@@ -284,14 +284,14 @@ window.RAI_KNOWLEDGE = [
     en: 'Sorting rules decide where each colour goes and the confidence threshold. Manage rules from the admin panel; guest mode is view-only.'
   },
   {
-    keys: ['firebase', 'database', 'basis data', 'realtime db', 'konek', 'connect', 'hubungkan', 'tersambung', 'online'],
-    id: 'Data sortir R-LAB tersimpan di Firebase Realtime Database: hitungan kuning, biru, merah, error, dan total — tersinkron realtime antara admin dan guest. Kredensialnya bersifat pribadi dan tidak saya bagikan.',
-    en: 'R-LAB stores sorting data in Firebase Realtime Database: yellow, blue, red, error counts and totals — synced realtime between admin and guest. Credentials are private and I never share them.'
-  },
-  {
     keys: ['password', 'api key', 'apikey', 'kunci api', 'kunci', 'kredensial', 'credential', 'token', 'rahasia', 'secret', 'database apa', 'isi database', 'lihat database', 'config'],
     id: 'Maaf, itu privasi — saya tidak bisa membagikan password, API key, kredensial, atau isi database apa pun. Saya hanya menjawab data sortir dan pengetahuan R-LAB.',
     en: 'Sorry, that is private — I cannot share passwords, API keys, credentials, or any database contents. I only answer sorting data and R-LAB knowledge.'
+  },
+  {
+    keys: ['firebase', 'database', 'basis data', 'realtime db', 'konek', 'connect', 'hubungkan', 'tersambung', 'online'],
+    id: 'Data sortir R-LAB tersimpan di Firebase Realtime Database: hitungan kuning, biru, merah, error, dan total — tersinkron realtime antara admin dan guest. Kredensialnya bersifat pribadi dan tidak saya bagikan.',
+    en: 'R-LAB stores sorting data in Firebase Realtime Database: yellow, blue, red, error counts and totals — synced realtime between admin and guest. Credentials are private and I never share them.'
   },
   {
     keys: ['suara', 'voice', 'mic ', 'mikrofon', 'microphone', 'bicara', 'ngomong', 'dengar'],
