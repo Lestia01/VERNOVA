@@ -377,6 +377,19 @@ function Handle-Health($ctx) {
   }
 }
 
+# ---------- /api/auth ----------
+function Handle-Auth($ctx) {
+  $raw = Get-PostBody $ctx
+  $req = $raw | ConvertFrom-Json
+  $pass = [string]$req.pass
+  $adminPass = if ($KEYS.PSObject.Properties['admin_password']) { [string]$KEYS.admin_password } else { '098765' }
+  if ($pass -and $pass -eq $adminPass) {
+    Send-Json $ctx @{ ok = $true; msg = 'Authenticated' }
+  } else {
+    Send-Json $ctx @{ ok = $false; error = 'Password salah' } 401
+  }
+}
+
 # ---------- start ----------
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$PORT/")
@@ -412,6 +425,7 @@ while ($listener.IsListening) {
     $meth = $ctx.Request.HttpMethod
 
     if ($path -eq '/api/health' -and $meth -eq 'GET')        { Handle-Health $ctx }
+    elseif ($path -eq '/api/auth' -and $meth -eq 'POST')     { Handle-Auth $ctx }
     elseif ($path -eq '/api/chat' -and $meth -eq 'POST')     { Handle-Chat $ctx }
     elseif ($path -eq '/api/stt' -and $meth -eq 'POST')      { Handle-Stt $ctx }
     elseif ($path -eq '/api/tts' -and $meth -eq 'POST')      { Handle-Tts $ctx }

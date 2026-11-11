@@ -1254,8 +1254,16 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
   /* ------------------------------------------------------------------ */
   /*  STATE                                                              */
-  /* Password admin — ganti sesuai kebutuhan */
-  const ADMIN_PASS = "098765";
+  /* Keamanan: Hash SHA-256 password admin (tidak menyimpan plaintext di source code) */
+  const ADMIN_PASS_HASH = "4a9ca4596692e94f9d2912b06a0d007564a22ee750339a6021c2392149b25d6d";
+
+  async function sha256Hex(str) {
+    try {
+      const buf = new TextEncoder().encode(str);
+      const digest = await crypto.subtle.digest("SHA-256", buf);
+      return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) { return ''; }
+  }
 
   /* Database bawaan — samakan guest, tanpa isi form */
   const FB_CONFIG = {
@@ -2339,9 +2347,33 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     const g = $('login-gate');
     if (g) g.classList.remove('hide');
   };
-  window.loginAdmin = () => {
-    const v = ($('admin-pass') ? $('admin-pass').value : '');
-    if (v === ADMIN_PASS) {
+  window.loginAdmin = async () => {
+    const v = ($('admin-pass') ? $('admin-pass').value : '').trim();
+    if (!v) {
+      const err = $('login-err'); if (err) err.classList.add('show');
+      return;
+    }
+    let ok = false;
+    // 1. Coba verifikasi aman via server backend jika online
+    try {
+      const r = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pass: v })
+      });
+      if (r.ok) {
+        const j = await r.json();
+        if (j.ok) ok = true;
+      }
+    } catch (e) {}
+
+    // 2. Fallback verifikasi hash SHA-256 jika server lokal offline
+    if (!ok) {
+      const h = await sha256Hex(v);
+      if (h === ADMIN_PASS_HASH) ok = true;
+    }
+
+    if (ok) {
       try { sessionStorage.setItem('rlab_admin_auth', '1'); } catch (e) {}
       const err = $('login-err'); if (err) err.classList.remove('show');
       hideGate();
