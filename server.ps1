@@ -21,20 +21,26 @@ $ROOT      = $PSScriptRoot
 $SECRETS   = Join-Path (Split-Path -Parent $ROOT) '_secrets'
 $KEYS_FILE = Join-Path $SECRETS 'keys.json'
 
+$KEYS = [PSCustomObject]@{}
+$KEYS_CONFIGURED = $false
 if (-not (Test-Path -LiteralPath $KEYS_FILE)) {
-  Write-Host "[FATAL] File kunci tidak ditemukan: $KEYS_FILE" -ForegroundColor Red
-  Write-Host "Buat folder _secrets di luar folder web, lalu isi keys.json:" -ForegroundColor Yellow
-  Write-Host '  { "groq_api_key": "gsk_...", "google_api_key": "...", "openrouter_api_key": "sk-or-v1-..." }'
-  exit 1
+  Write-Host "  [INFO] File kunci ($KEYS_FILE) belum ada." -ForegroundColor Yellow
+  Write-Host "  Server tetap melayani web statis & asisten R-AI beroperasi dalam mode fallback." -ForegroundColor Gray
+} else {
+  try {
+    $KEYS = Get-Content -LiteralPath $KEYS_FILE -Raw | ConvertFrom-Json
+    $KEYS_CONFIGURED = $true
+  } catch {
+    Write-Host "  [WARN] Gagal membaca keys.json: $($_.Exception.Message)" -ForegroundColor DarkYellow
+  }
 }
 
-$KEYS = Get-Content -LiteralPath $KEYS_FILE -Raw | ConvertFrom-Json
-$GROQ_KEY       = $KEYS.groq_api_key
-$GROQ_KEY_2     = $KEYS.groq_api_key_2
-$GROQ_KEY_3     = $KEYS.groq_api_key_3
-$GOOGLE_KEY     = $KEYS.google_api_key
-$GOOGLE_KEY_2   = $KEYS.google_api_key_2
-$GOOGLE_KEY_3   = $KEYS.google_api_key_3
+$GROQ_KEY       = if ($KEYS.PSObject.Properties['groq_api_key']) { $KEYS.groq_api_key } else { '' }
+$GROQ_KEY_2     = if ($KEYS.PSObject.Properties['groq_api_key_2']) { $KEYS.groq_api_key_2 } else { '' }
+$GROQ_KEY_3     = if ($KEYS.PSObject.Properties['groq_api_key_3']) { $KEYS.groq_api_key_3 } else { '' }
+$GOOGLE_KEY     = if ($KEYS.PSObject.Properties['google_api_key']) { $KEYS.google_api_key } else { '' }
+$GOOGLE_KEY_2   = if ($KEYS.PSObject.Properties['google_api_key_2']) { $KEYS.google_api_key_2 } else { '' }
+$GOOGLE_KEY_3   = if ($KEYS.PSObject.Properties['google_api_key_3']) { $KEYS.google_api_key_3 } else { '' }
 
 # ============ R-AI: CHAIN PRIORITAS API KEY ============
 # Urutan: Google Key Baru 1 -> Google Key Baru 2 -> Google Key Lama -> Groq Lama -> Groq Baru 1 -> Groq Baru 2 -> Local
@@ -90,8 +96,10 @@ $MIME = @{
   '.svg'  = 'image/svg+xml'; '.ico' = 'image/x-icon'
   '.woff2'= 'font/woff2'; '.woff' = 'font/woff'; '.ttf' = 'font/ttf'
   '.txt'  = 'text/plain; charset=utf-8'; '.mp3' = 'audio/mpeg'; '.wav' = 'audio/wav'; '.csv' = 'text/csv; charset=utf-8'
+  '.pdf'  = 'application/pdf'; '.xlsx' = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  '.docx' = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 }
-$ALLOW_EXT = @('.html','.js','.css','.json','.png','.jpg','.jpeg','.svg','.ico','.woff2','.woff','.ttf','.txt','.mp3','.wav','.csv')
+$ALLOW_EXT = @('.html','.js','.css','.json','.png','.jpg','.jpeg','.svg','.ico','.woff2','.woff','.ttf','.txt','.mp3','.wav','.csv','.pdf','.xlsx','.docx')
 # nama file yang DILARANG untuk diserve (risiko bocor secret / script server)
 $DENY = @('server.ps1','keys.json','secrets.json','.env','.git','.gitconfig','web.config')
 
@@ -212,6 +220,7 @@ function Handle-Stt($ctx) {
   elseif ($ctype -match 'aac') { $ext = 'aac' }
   elseif ($ctype -match 'flac') { $ext = 'flac' }
   if (-not $ext) { $ext = 'webm' }
+  if (-not $GROQ_KEY) { Send-Text $ctx 'Groq API Key belum dikonfigurasi di keys.json' 503; return }
 
   Add-Type -AssemblyName System.Net.Http
   $h = New-Object System.Net.Http.HttpClient

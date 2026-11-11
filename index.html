@@ -18,7 +18,7 @@
 <style>
 /* Inter self-hosted (lokal) — supaya tidak 404 dan tetap jalan tanpa internet */
 @font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;
-  src:url('assets/fonts/Inter-Variable.woff2') format('woff2');
+  src:url('assets/font/Inter-Variable.woff2') format('woff2');
   unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
 </style>
 
@@ -30,6 +30,7 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 
   <style>
   /* ================= THEME TOKENS ================= */
@@ -1166,9 +1167,12 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
       <p class="text-[10px] font-black uppercase tracking-[.15em] t-muted mb-3" data-i18n="exp.choose">Choose a format</p>
 
-      <div class="grid grid-cols-3 gap-2 sm:gap-3">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
         <button class="export-tile" onclick="window.doExport('xlsx')">
           <i class="fas fa-file-excel" style="color:#16a34a"></i><span>Excel</span><small>.XLSX · COLORED</small>
+        </button>
+        <button class="export-tile" onclick="window.doExport('docx')">
+          <i class="fas fa-file-word" style="color:#2563eb"></i><span>Word</span><small>.DOCX · RICH DOC</small>
         </button>
         <button class="export-tile" onclick="window.doExport('pdf')">
           <i class="fas fa-file-pdf" style="color:#dc2626"></i><span>PDF</span><small>.PDF · PRINT READY</small>
@@ -2635,7 +2639,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     downloadBlob(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' }), `R-LAB_Report_${timestampTag()}.csv`);
     showToast("CSV berhasil diunduh!");
   }
-  window.exportExcel = () => exportCSV();
+  window.exportExcel = () => exportXLSX();
 
   /* ---------- XLSX ---------- */
   function exportXLSX() {
@@ -3066,6 +3070,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     await new Promise(r => setTimeout(r, 180));
     try {
       if (type === 'xlsx') exportXLSX();
+      else if (type === 'docx') exportDOCX();
       else if (type === 'pdf') exportPDF();
       else exportCSV();
     } catch (e) { console.error(e); showToast("Export error: " + e.message); }
