@@ -1243,7 +1243,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   <script src="rai-knowledge.js"></script>
   <script type="module">
   import { initializeApp, getApps, deleteApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-  import { getDatabase, ref, onValue, update, set } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
+  import { getDatabase, ref, onValue, update, set, push } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
   /* ------------------------------------------------------------------ */
   /*  BLE UART UUIDs                                                     */
@@ -1887,8 +1887,20 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         ts: nowMs, kind: 'data', key: 'err|' + nowMs });
 
       if (state.db) {
-        update(ref(state.db, `${state.currentPath}/gagal`), {
-          [state.sortingData.gagal - 1]: { timestamp: nowMs, value: 1, warna: properColorName, mode: errMode, status: errStatus }
+        push(ref(state.db, `${state.currentPath}/gagal`), {
+          runId: `err_${nowMs}_${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: nowMs,
+          detectedColor: properColorName,
+          warna: properColorName,
+          mode: errMode,
+          commandStatus: expectedColor === 'force' ? 'force_timeout' : 'watchdog_timeout',
+          executionStatus: 'failed',
+          sortResult: 'error',
+          status: errStatus,
+          errorCode: expectedColor === 'force' ? 'ERR_FORCE_TIMEOUT' : 'ERR_WATCHDOG_12S',
+          duration: durationMs || 0,
+          durationMs: durationMs || 0,
+          value: 1
         }).catch(e => console.error("Firebase Error:", e));
       }
 
@@ -1951,8 +1963,19 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
     if (state.db) {
       try {
-        await update(ref(state.db, `${state.currentPath}/${category}`), {
-          [state.sortingData[category] - 1]: { timestamp: nowMs, mode: currentMode, duration: durationMs || 0, value: 1 }
+        await push(ref(state.db, `${state.currentPath}/${category}`), {
+          runId: `sort_${nowMs}_${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: nowMs,
+          detectedColor: properColorName,
+          warna: properColorName,
+          mode: currentMode,
+          commandStatus: 'sent',
+          executionStatus: 'confirmed_ble',
+          sortResult: 'success',
+          status: 'Berhasil',
+          duration: durationMs || 0,
+          durationMs: durationMs || 0,
+          value: 1
         });
       } catch (e) {}
     }
@@ -1993,8 +2016,19 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
     if (state.db) {
       try {
-        await update(ref(state.db, `${state.currentPath}/${category}`), {
-          [state.sortingData[category] - 1]: { timestamp: nowMs, mode: currentMode, value: 1 }
+        await push(ref(state.db, `${state.currentPath}/${category}`), {
+          runId: `sort_${nowMs}_${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: nowMs,
+          detectedColor: properColorName,
+          warna: properColorName,
+          mode: currentMode,
+          commandStatus: 'standalone',
+          executionStatus: 'unverified_hardware',
+          sortResult: 'success',
+          status: 'Berhasil',
+          duration: 0,
+          durationMs: 0,
+          value: 1
         });
       } catch (e) {}
     }
@@ -2041,9 +2075,21 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       ts: nowMs, kind: 'data', key: 'err|' + nowMs });
 
     if (state.db) {
-      await update(ref(state.db, `${state.currentPath}/gagal`), {
-        [state.sortingData.gagal - 1]: { timestamp: nowMs, value: 1, warna: missortColor, mode: qcMode, status: 'Manual QC' }
-      });
+      await push(ref(state.db, `${state.currentPath}/gagal`), {
+        runId: `qc_${nowMs}_${Math.random().toString(36).slice(2, 7)}`,
+        timestamp: nowMs,
+        detectedColor: missortColor,
+        warna: missortColor,
+        mode: qcMode,
+        commandStatus: 'manual_qc',
+        executionStatus: 'operator_override',
+        sortResult: 'missort',
+        status: 'Manual QC',
+        errorCode: 'ERR_MANUAL_QC_MISSORT',
+        duration: 0,
+        durationMs: 0,
+        value: 1
+      }).catch(e => console.error("Firebase Error:", e));
     }
   };
 
@@ -2089,8 +2135,19 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
     if (state.db) {
       try {
-        await update(ref(state.db, `${state.currentPath}/${c}`), {
-          [state.sortingData[c] - 1]: { timestamp: nowMs, mode: currentMode, value: 1 }
+        await push(ref(state.db, `${state.currentPath}/${c}`), {
+          runId: `manual_${nowMs}_${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: nowMs,
+          detectedColor: properColorName,
+          warna: properColorName,
+          mode: currentMode,
+          commandStatus: 'manual_override',
+          executionStatus: 'operator_entry',
+          sortResult: 'success',
+          status: 'Manual',
+          duration: 0,
+          durationMs: 0,
+          value: 1
         });
       } catch (e) {}
     }
