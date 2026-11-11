@@ -1,0 +1,25 @@
+# Kredensial dan Secret
+_secrets/
+keys.json
+secrets.json
+*.key
+.env
+.env.*
+.env.local
+
+# File Log & Debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# File OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Dependencies (jika ditambahkan di kemudian hari)
+node_modules/
+dist/
+build/
