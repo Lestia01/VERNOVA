@@ -534,6 +534,10 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   #toast.show .toast-inner{animation:toastPop .32s cubic-bezier(.2,.9,.3,1.2) both;}
   .export-tile{transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease;}
   .export-tile:hover{transform:translateY(-2px);}
+  .feed-filter-btn{background:var(--surface-soft);border-color:var(--border);color:var(--muted);cursor:pointer;}
+  .feed-filter-btn:hover{color:var(--text);border-color:var(--gold);}
+  .feed-filter-btn.active{background:var(--gold-soft);color:var(--brand);border-color:var(--gold);}
+  html.dark .feed-filter-btn.active{background:rgba(198,154,69,.22);color:#e8eef7;border-color:var(--gold);}
   /* ============ REFINED MOTION: tenang, presisi, modern ============ */
   :root{--ease:cubic-bezier(.2,.8,.3,1);}
   @keyframes riseSoft{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -876,7 +880,16 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
           </div>
 
           <div class="card p-4 sm:p-5">
-            <h3 class="card-title mb-3"><i class="fas fa-clock-rotate-left"></i><span data-i18n="log.title">Live History</span></h3>
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+              <h3 class="card-title"><i class="fas fa-clock-rotate-left"></i><span data-i18n="log.title">Live History</span></h3>
+              <div class="flex items-center gap-1.5 flex-wrap" id="feed-filter-btns">
+                <button onclick="window.setFeedFilter('all')" class="feed-filter-btn text-[10px] px-2.5 py-1 rounded-lg font-bold border transition active" data-filter="all">Semua</button>
+                <button onclick="window.setFeedFilter('kuning')" class="feed-filter-btn text-[10px] px-2.5 py-1 rounded-lg font-bold border transition text-amber-600 dark:text-amber-400" data-filter="kuning">Kuning</button>
+                <button onclick="window.setFeedFilter('biru')" class="feed-filter-btn text-[10px] px-2.5 py-1 rounded-lg font-bold border transition text-blue-600 dark:text-blue-400" data-filter="biru">Biru</button>
+                <button onclick="window.setFeedFilter('merah')" class="feed-filter-btn text-[10px] px-2.5 py-1 rounded-lg font-bold border transition text-red-600 dark:text-red-400" data-filter="merah">Merah</button>
+                <button onclick="window.setFeedFilter('error')" class="feed-filter-btn text-[10px] px-2.5 py-1 rounded-lg font-bold border transition text-rose-600 dark:text-rose-400" data-filter="error">Error</button>
+              </div>
+            </div>
             <div class="space-y-2 max-h-[320px] overflow-y-auto pr-1" id="log-panel">
               <p class="text-[11px] t-muted italic" data-i18n="log.empty">Belum ada aktivitas.</p>
             </div>
@@ -1426,16 +1439,33 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   }
   window.showToast = showToast;
 
-  /* Riwayat full samakan guest: 1 feed, newest-first, maks 18 tampil */
-  const FEED_MAX = 18;
+  /* Riwayat live: filter kategori & newest-first */
+  state.feedFilter = 'all';
+  window.setFeedFilter = (f) => {
+    state.feedFilter = f;
+    document.querySelectorAll('.feed-filter-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.filter === f);
+    });
+    renderFeed();
+  };
+
+  const FEED_MAX = 25;
   function renderFeed() {
     const panel = $('log-panel');
     if (!panel) return;
-    if (!state.feed.length) {
+    let list = state.feed || [];
+    if (state.feedFilter && state.feedFilter !== 'all') {
+      const f = state.feedFilter.toLowerCase();
+      list = list.filter(ev => {
+        const text = ((ev.title || '') + ' ' + (ev.desc || '') + ' ' + (ev.key || '')).toLowerCase();
+        return text.includes(f);
+      });
+    }
+    if (!list.length) {
       panel.innerHTML = `<p class="text-[11px] t-muted italic" data-i18n="log.empty">${t('log.empty')}</p>`;
       return;
     }
-    panel.innerHTML = state.feed.slice(0, FEED_MAX).map(ev => `
+    panel.innerHTML = list.slice(0, FEED_MAX).map(ev => `
       <div class="log-item">
         <div class="log-ico" style="${ev.style}"><i class="${ev.icon}"></i></div>
         <div class="overflow-hidden">
@@ -1484,7 +1514,12 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   /* ================================================================== */
   $('btn-conn-bt').onclick = async () => {
     try {
-      if (!navigator.bluetooth) throw new Error("Bluetooth tidak didukung browser ini.");
+      if (!navigator.bluetooth) {
+        throw new Error(state.lang === 'id' 
+          ? "Browser tidak mendukung Web Bluetooth (gunakan Google Chrome/Edge di desktop via localhost/HTTPS)."
+          : "Browser does not support Web Bluetooth (use Google Chrome/Edge on desktop via localhost/HTTPS).");
+      }
+      setPill($('status-bt'), 'warn', "BT: CONNECTING...");
       state.device = await navigator.bluetooth.requestDevice({
         filters: [{ namePrefix: "BBC micro:bit" }],
         optionalServices: [UART_SERVICE_UUID]
@@ -1493,6 +1528,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       state.device.addEventListener("gattserverdisconnected", () => {
         state.bleConnected = false; updateBLEUI();
         logActivity("fas fa-xmark", "background:rgba(239,68,68,.15);color:#ef4444", "BT Disconnected", "Micro:bit terputus.");
+        showToast(state.lang === 'id' ? "Micro:bit terputus!" : "Micro:bit disconnected!");
       });
 
       const server = await state.device.gatt.connect();
@@ -1507,7 +1543,14 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       state.bleConnected = true; updateBLEUI();
       showToast("Micro:bit Connected!");
       logActivity("fab fa-bluetooth-b", "background:rgba(59,130,246,.15);color:#3b82f6", "Bluetooth Active", "Terhubung ke Micro:bit");
-    } catch (e) { showToast("Gagal konek: " + e.message); }
+    } catch (e) {
+      updateBLEUI();
+      if (e && (e.name === 'NotFoundError' || /cancelled/i.test(e.message))) {
+        showToast(state.lang === 'id' ? "Pencarian Bluetooth dibatalkan." : "Bluetooth pairing cancelled.");
+      } else {
+        showToast((state.lang === 'id' ? "Gagal konek Bluetooth: " : "Bluetooth error: ") + e.message);
+      }
+    }
   };
 
   $('btn-dis-bt').onclick = () => { if (state.device) state.device.gatt.disconnect(); };

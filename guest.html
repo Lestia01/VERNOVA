@@ -237,6 +237,10 @@ html.dark .mnav-btn:hover{background:rgba(148,163,184,.12);color:var(--text);}
 #toast.show .toast-inner{animation:toastPop .32s cubic-bezier(.2,.9,.3,1.2) both;}
 .export-tile{transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease;}
 .export-tile:hover{transform:translateY(-2px);}
+.feed-filter-btn{background:var(--surface-soft);border-color:var(--border);color:var(--muted);cursor:pointer;}
+.feed-filter-btn:hover{color:var(--text);border-color:var(--gold);}
+.feed-filter-btn.active{background:var(--gold-soft);color:var(--brand);border-color:var(--gold);}
+html.dark .feed-filter-btn.active{background:rgba(198,154,69,.22);color:#e8eef7;border-color:var(--gold);}
 /* ============ REFINED MOTION: tenang, presisi, modern ============ */
 :root{--ease:cubic-bezier(.2,.8,.3,1);}
 @keyframes riseSoft{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -470,7 +474,16 @@ html:not(.dark) .jarvis-msg.bot{color:#0f172a;font-weight:500;}
         </div>
 
         <div class="card p-4 sm:p-5">
-          <h3 class="card-title mb-3"><i class="fas fa-clock-rotate-left"></i><span data-i18n="log.title">Riwayat Langsung</span></h3>
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+            <h3 class="card-title"><i class="fas fa-clock-rotate-left"></i><span data-i18n="log.title">Riwayat Langsung</span></h3>
+            <div class="flex items-center gap-1.5 flex-wrap" id="feed-filter-btns">
+              <button onclick="window.setGuestFeedFilter('all')" class="feed-filter-btn text-[10px] px-2.5 py-1 rounded-lg font-bold border transition active" data-filter="all">Semua</button>
+              <button onclick="window.setGuestFeedFilter('kuning')" class="feed-filter-btn text-[10px] px-2.5 py-1 rounded-lg font-bold border transition text-amber-600 dark:text-amber-400" data-filter="kuning">Kuning</button>
+              <button onclick="window.setGuestFeedFilter('biru')" class="feed-filter-btn text-[10px] px-2.5 py-1 rounded-lg font-bold border transition text-blue-600 dark:text-blue-400" data-filter="biru">Biru</button>
+              <button onclick="window.setGuestFeedFilter('merah')" class="feed-filter-btn text-[10px] px-2.5 py-1 rounded-lg font-bold border transition text-red-600 dark:text-red-400" data-filter="merah">Merah</button>
+              <button onclick="window.setGuestFeedFilter('error')" class="feed-filter-btn text-[10px] px-2.5 py-1 rounded-lg font-bold border transition text-rose-600 dark:text-rose-400" data-filter="error">Error</button>
+            </div>
+          </div>
           <div class="space-y-2 max-h-[320px] overflow-y-auto pr-1" id="log-panel">
             <p class="text-[11px] t-muted italic" data-i18n="log.empty">Menunggu data dari Firebase...</p>
           </div>
@@ -916,15 +929,40 @@ function renderFromData(data) {
       nilai: ev.isError ? 0 : 1
     }));
 
+  state.allEvents = events;
+  renderGuestFeedPanel();
+}
+
+state.feedFilter = 'all';
+window.setGuestFeedFilter = (f) => {
+  state.feedFilter = f;
+  document.querySelectorAll('.feed-filter-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === f);
+  });
+  renderGuestFeedPanel();
+};
+
+function renderGuestFeedPanel() {
   const panel = $('log-panel');
+  if (!panel) return;
+  let events = state.allEvents || [];
+  if (state.feedFilter && state.feedFilter !== 'all') {
+    const f = state.feedFilter.toLowerCase();
+    events = events.filter(ev => {
+      const w = String(ev.warna || '').toLowerCase();
+      if (f === 'error') return ev.isError;
+      return w.includes(f);
+    });
+  }
   if (!events.length) {
     panel.innerHTML = `<p class="text-[11px] t-muted italic">${I18N[state.lang]['log.empty']}</p>`;
     return;
   }
+  const disp = (w) => w || 'Unknown';
   const names = { Kuning: 'Kuning', Biru: 'Biru', Merah: 'Merah', Unknown: 'Unknown' };
   const iconMap = { Kuning: 'fas fa-circle', Biru: 'fas fa-circle', Merah: 'fas fa-circle', Unknown: 'fas fa-triangle-exclamation' };
   const colorStyle = { Kuning: 'color:#d97706', Biru: 'color:#1a2456', Merah: 'color:#b91c1c', Unknown: 'color:#f97316' };
-  panel.innerHTML = events.slice(0, 18).map(ev => {
+  panel.innerHTML = events.slice(0, 25).map(ev => {
     const w = disp(ev.warna);
     return `
     <div class="log-item">
