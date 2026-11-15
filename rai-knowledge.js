@@ -79,9 +79,9 @@ window.RAI_KNOWLEDGE = [
     en: 'R-LAB runs autonomously: once the AI model is live and the conveyor runs, objects are detected, classified, sorted, and logged with no operator — only monitored via the dashboard.'
   },
   {
-    keys: ['micro:bit', 'microbit', 'mikrokontroler', 'microcontroller', 'arduino', 'esp32', 'uart', 'firmware', 'embedded'],
-    id: 'Otak robot R-LAB memakai mikrokontroler (micro:bit) dengan firmware embedded yang berkomunikasi via protokol UART: menerima hasil klasifikasi AI lalu menggerakkan servo/aktuator dan membaca sensor.',
-    en: 'R-LAB\'s robot brain uses a microcontroller (micro:bit) with embedded firmware communicating over UART: it receives AI classification results, then drives the servo/actuator and reads sensors.'
+    keys: ['esp32', 'wifi', 'wi-fi', 'ip esp32', 'mikrokontroler', 'microcontroller', 'arduino', 'microbit', 'firmware', 'embedded', 'rest api', 'http api'],
+    id: 'Otak robot VERNOVA memakai mikrokontroler ESP32 berbasis Wi-Fi / LAN yang berkomunikasi via protokol HTTP REST API: menerima perintah sortir JSON (/api/sort) dari browser, menggerakkan servo/aktuator, dan mengembalikan konfirmasi acknowledgment.',
+    en: 'VERNOVA\'s robot brain uses an ESP32 microcontroller over Wi-Fi / LAN communicating via HTTP REST API: it receives JSON sorting commands (/api/sort) from the browser, actuates servos, and returns acknowledgment receipts.'
   },
   {
     keys: ['pengkabelan', 'wiring', 'kabel', 'cable', 'rangkaian', 'circuit', 'elektronika', 'electronics', 'catu daya', 'power supply', 'daya ', 'baterai', 'battery', 'voltase', 'tegangan'],

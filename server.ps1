@@ -390,6 +390,45 @@ function Handle-Auth($ctx) {
   }
 }
 
+# ---------- /api/esp32 proxy ----------
+function Handle-Esp32Proxy($ctx, $path, $meth) {
+  $targetHost = if ($KEYS.PSObject.Properties['esp32_host']) { [string]$KEYS.esp32_host } else { 'http://192.168.4.1' }
+  $customHost = $ctx.Request.Headers['X-ESP32-Host']
+  if ($customHost) { $targetHost = $customHost.Trim().TrimEnd('/') }
+  
+  $subPath = $path -replace '^/api/esp32', ''
+  if (-not $subPath) { $subPath = '/api/status' }
+  $targetUrl = "$targetHost$subPath"
+
+  try {
+    Add-Type -AssemblyName System.Net.Http
+    $client = New-Object System.Net.Http.HttpClient
+    $client.Timeout = [TimeSpan]::FromSeconds(5)
+
+    if ($meth -eq 'GET') {
+      $resp = $client.GetAsync($targetUrl).Result
+      $content = $resp.Content.ReadAsStringAsync().Result
+      $status = [int]$resp.StatusCode
+      Send-Text $ctx $content $status @{ 'Content-Type' = 'application/json'; 'Access-Control-Allow-Origin' = '*' }
+    } elseif ($meth -eq 'POST') {
+      $body = Get-PostBody $ctx
+      $httpContent = New-Object System.Net.Http.StringContent($body, [System.Text.Encoding]::UTF8, 'application/json')
+      $resp = $client.PostAsync($targetUrl, $httpContent).Result
+      $content = $resp.Content.ReadAsStringAsync().Result
+      $status = [int]$resp.StatusCode
+      Send-Text $ctx $content $status @{ 'Content-Type' = 'application/json'; 'Access-Control-Allow-Origin' = '*' }
+    } else {
+      Send-Text $ctx 'Method not allowed' 405
+    }
+  } catch {
+    Send-Json $ctx @{
+      ok = $false
+      error = "ESP32 Proxy Error: $($_.Exception.Message)"
+      targetUrl = $targetUrl
+    } 502
+  }
+}
+
 # ---------- start ----------
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$PORT/")
@@ -409,6 +448,7 @@ Write-Host '  ============================================================' -For
 Write-Host ("   Buka        : http://localhost:$PORT/") -ForegroundColor Green
 Write-Host ("   Admin       : http://localhost:$PORT/index.html") -ForegroundColor Green
 Write-Host ("   Guest       : http://localhost:$PORT/guest.html") -ForegroundColor Green
+Write-Host ("   ESP32 Proxy : http://localhost:$PORT/api/esp32/status") -ForegroundColor Green
 Write-Host ("   AI (primer) : " + (($CHAIN | ForEach-Object { $_.id }) -join '  ->  ')) -ForegroundColor Gray
 Write-Host ("   STT         : $STT_MODEL (Groq Whisper)") -ForegroundColor Gray
 Write-Host ("   Kunci API   : tersimpan di $KEYS_FILE") -ForegroundColor Gray
@@ -426,6 +466,7 @@ while ($listener.IsListening) {
 
     if ($path -eq '/api/health' -and $meth -eq 'GET')        { Handle-Health $ctx }
     elseif ($path -eq '/api/auth' -and $meth -eq 'POST')     { Handle-Auth $ctx }
+    elseif ($path -like '/api/esp32*' -or $path -eq '/api/esp32') { Handle-Esp32Proxy $ctx $path $meth }
     elseif ($path -eq '/api/chat' -and $meth -eq 'POST')     { Handle-Chat $ctx }
     elseif ($path -eq '/api/stt' -and $meth -eq 'POST')      { Handle-Stt $ctx }
     elseif ($path -eq '/api/tts' -and $meth -eq 'POST')      { Handle-Tts $ctx }

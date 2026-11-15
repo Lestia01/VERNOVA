@@ -131,3 +131,46 @@
   - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
   - **Solusi:** 8 berkas dokumentasi teknis mendalam dibuat di bawah folder `docs/` (`PROJECT_AUDIT_WEB.md`, `ARCHITECTURE_WEB.md`, `DATABASE_SCHEMA.md`, `SECURITY_REVIEW_WEB.md`, `TEST_PLAN_WEB.md`, `TEST_RESULTS_WEB.md`, `DEPLOYMENT_GUIDE_WEB.md`, `CHANGELOG_WEB.md`).
   - **File:** `docs/*.md`.
+
+---
+
+## 5. P1 — MIGRASI KOMUNIKASI ESP32 WI-FI LAN (V2.2)
+
+- [x] **ESP-001 (P1)**: Pembuatan Adapter Klien Modular ESP32 Wi-Fi REST API
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Membuat `assets/js/esp32-client.js` dengan dukungan HTTP REST (`/api/status`, `/api/sort`, `/api/mode`, `/api/stop`), timeout abort controller, dan mode simulasi virtual hardware.
+  - **File:** `assets/js/esp32-client.js`.
+
+- [x] **ESP-002 (P1)**: Penggantian Kontrol UI Bluetooth ke ESP32 Wi-Fi
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Mengganti `#status-bt` dengan `#status-esp32` dan tombol koneksi dengan `#btn-conn-esp32`, serta menambahkan modal konfigurasi IP, ping test, dan telemetri diagnostik live.
+  - **File:** `index.html`.
+
+- [x] **ESP-003 (P1)**: Integrasi Loop AI Vision & Manual QC ke ESP32 Client
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Mengarahkan hasil inferensi Teachable Machine (`> 85%`) dan tombol QC manual langsung ke `window.esp32Client.sendSortingCommand`, dilengkapi cooldown latch dan watchdog 12s.
+  - **File:** `index.html`.
+
+- [x] **ESP-004 (P1)**: Backend Proxy `/api/esp32` pada Server Lokal PowerShell
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Menambahkan handler `Handle-Esp32Proxy` di `server.ps1` untuk meneruskan request ke target ESP32 dengan header CORS lengkap.
+  - **File:** `server.ps1`.
+
+- [x] **ESP-005 (P1)**: Firmware Referensi Arduino C++ ESP32 REST Server
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Membuat skrip firmware lengkap dengan dukungan SoftAP hotspot `VERNOVA-ROBOT` (IP: `192.168.4.1`), web server port 80, kontrol PWM servo flap & arm, serta header CORS.
+  - **File:** `firmware/esp32_vernova_sorting/esp32_vernova_sorting.ino`.
+
+- [x] **ESP-006 (P1)**: Suite Pengujian Otomatis Klien ESP32 (8 Kasus Uji Baru)
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Hasil:** 28/28 test passing (8 unit test klien ESP32 + 20 unit test existing) via runner `node:test`.
+  - **File:** `tests/esp32_client.test.js`.
+
+- [x] **ESP-007 (P1)**: Suite Dokumentasi Migrasi Komprehensif
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Menyusun 7 berkas dokumentasi teknis migrasi (`ESP32_WIFI_ARCHITECTURE.md`, `ESP32_COMMUNICATION_PROTOCOL.md`, `ESP32_MIGRATION_PLAN.md`, `ESP32_SECURITY_REVIEW.md`, `ESP32_TEST_PLAN.md`, `ESP32_TEST_RESULTS.md`, `ESP32_SETUP_GUIDE.md`).
+  - **File:** `docs/*.md`.
+
+- [M] **ESP-008 (P0)**: Pengujian Integrasi Fisik Lengan Robotik di Lapangan
+  - **Status:** `[M] PERLU PENGUJIAN MANUAL` (Memerlukan board ESP32 fisik yang diflash dan dihubungkan ke motor servo nyata di lini sorting).
+  - **File:** `firmware/esp32_vernova_sorting/esp32_vernova_sorting.ino`, `docs/ESP32_SETUP_GUIDE.md`.

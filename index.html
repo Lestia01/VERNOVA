@@ -31,6 +31,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<script src="assets/js/esp32-client.js"></script>
 
   <style>
   /* ================= THEME TOKENS ================= */
@@ -710,7 +711,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         <img src="logo.png" alt="Logo R-LAB" class="w-9 h-9 rounded-lg shrink-0 lg:hidden" style="object-fit:cover;border:1px solid var(--border)">
 
         <div class="status-group" role="status" aria-label="Status koneksi">
-          <div id="status-bt" class="pill">BT: OFFLINE</div>
+          <div id="status-esp32" class="pill" onclick="window.openModal('esp32-modal')" title="ESP32 Wi-Fi Status (Klik untuk Konfigurasi)" style="cursor:pointer">ESP32: OFFLINE</div>
           <div id="status-fb" class="pill">FB: OFFLINE</div>
           <div id="status-tm" class="pill">AI: STANDBY</div>
         </div>
@@ -725,12 +726,8 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <i class="fas fa-database text-xs"></i>
           </button>
 
-          <button id="btn-conn-bt" class="btn-primary px-3 py-2 text-[10px] flex items-center gap-2">
-            <i class="fab fa-bluetooth-b"></i><span class="hidden sm:inline" data-i18n="btn.connect">CONNECT</span>
-          </button>
-
-          <button id="btn-dis-bt" disabled class="icon-btn danger" title="Disconnect">
-            <i class="fas fa-xmark text-xs"></i>
+          <button id="btn-conn-esp32" onclick="window.openModal('esp32-modal')" class="btn-primary px-3 py-2 text-[10px] flex items-center gap-2" title="ESP32 Wi-Fi Configuration">
+            <i class="fas fa-wifi"></i><span class="hidden sm:inline" data-i18n="btn.connectEsp32">ESP32 WI-FI</span>
           </button>
 
         <button onclick="window.logoutAdmin()" class="icon-btn" title="Back to Home">
@@ -961,14 +958,14 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
               <p class="text-[11px] t-muted leading-relaxed">TensorFlow.js + Teachable Machine classify every object in the browser with a confidence threshold of 85%.</p>
             </div>
             <div class="card card-hover p-5">
-              <div class="metric-icon" style="background:rgba(6,182,212,.15);color:#06b6d4"><i class="fab fa-bluetooth-b"></i></div>
-              <h3 class="font-bold text-sm mb-2">2 · BLE UART Bridge</h3>
-              <p class="text-[11px] t-muted leading-relaxed">Web Bluetooth writes the detected colour to the Nordic UART TX characteristic of the BBC micro:bit.</p>
+              <div class="metric-icon" style="background:rgba(6,182,212,.15);color:#06b6d4"><i class="fas fa-wifi"></i></div>
+              <h3 class="font-bold text-sm mb-2">2 · ESP32 Wi-Fi REST Bridge</h3>
+              <p class="text-[11px] t-muted leading-relaxed">The browser dispatches a structured JSON payload over HTTP REST API to the ESP32 endpoint (/api/sort).</p>
             </div>
             <div class="card card-hover p-5">
               <div class="metric-icon" style="background:rgba(168,85,247,.15);color:#a855f7"><i class="fas fa-microchip"></i></div>
-              <h3 class="font-bold text-sm mb-2">3 · Robot Brain</h3>
-              <p class="text-[11px] t-muted leading-relaxed">The micro:bit drives the servo/arm, then echoes the colour back as a handshake confirmation.</p>
+              <h3 class="font-bold text-sm mb-2">3 · ESP32 Robot Brain</h3>
+              <p class="text-[11px] t-muted leading-relaxed">The ESP32 parses the JSON command, drives sorting servos, and returns an instant JSON acknowledgment.</p>
             </div>
             <div class="card card-hover p-5">
               <div class="metric-icon" style="background:rgba(34,197,94,.15);color:#22c55e"><i class="fas fa-check-double"></i></div>
@@ -1143,6 +1140,73 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       <button id="btn-conn-fb" class="btn-primary w-full py-3.5 text-xs mt-5 min-h-[48px]">
         <i class="fas fa-plug mr-2"></i><span data-i18n="fb.connect">CONNECT TO DATABASE</span>
       </button>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: ESP32 WI-FI CONFIG ===================== -->
+  <div id="esp32-modal" class="modal">
+    <div class="modal-backdrop" onclick="window.closeModal('esp32-modal')"></div>
+    <div class="modal-panel">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-black text-base flex items-center gap-2">
+          <i class="fas fa-wifi" style="color:var(--brand)"></i>
+          <span>Koneksi ESP32 Wi-Fi</span>
+        </h3>
+        <button onclick="window.closeModal('esp32-modal')" class="icon-btn"><i class="fas fa-xmark text-xs"></i></button>
+      </div>
+
+      <div class="space-y-4 text-xs">
+        <div>
+          <label class="block font-bold mb-1 t-main">Alamat IP / Host ESP32</label>
+          <div class="flex gap-2">
+            <input type="text" id="esp32-host-input" class="inp flex-1 font-mono text-[11px]" placeholder="http://192.168.4.1" value="http://192.168.4.1">
+            <button id="btn-esp32-ping" onclick="window.pingEsp32()" class="btn-primary px-3 py-2 text-[11px] whitespace-nowrap">
+              <i class="fas fa-bolt mr-1"></i>Test Ping
+            </button>
+          </div>
+          <div class="flex flex-wrap gap-1.5 mt-2">
+            <span class="text-[10px] t-muted mr-1">Preset:</span>
+            <button type="button" onclick="document.getElementById('esp32-host-input').value='http://192.168.4.1'" class="text-[10px] px-2 py-0.5 rounded border t-main hover:bg-slate-200 dark:hover:bg-slate-700">192.168.4.1 (SoftAP)</button>
+            <button type="button" onclick="document.getElementById('esp32-host-input').value=window.location.origin+'/api/esp32'" class="text-[10px] px-2 py-0.5 rounded border t-main hover:bg-slate-200 dark:hover:bg-slate-700">Proxy Lokal (/api/esp32)</button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between p-3.5 rounded-xl border" style="background:var(--surface-soft);border-color:var(--border)">
+          <div>
+            <p class="font-bold t-main text-[11px]">Mode Simulasi (Virtual Hardware)</p>
+            <p class="text-[10px] t-muted mt-0.5">Uji coba AI &amp; dashboard tanpa perangkat fisik.</p>
+          </div>
+          <input type="checkbox" id="esp32-sim-toggle" onchange="window.toggleEsp32Sim(this.checked)" class="w-4 h-4 cursor-pointer">
+        </div>
+
+        <!-- Telemetri Diagnostik -->
+        <div id="esp32-telemetry-box" class="p-3.5 rounded-xl border space-y-1.5 text-[11px]" style="background:var(--surface-soft);border-color:var(--border)">
+          <div class="flex justify-between">
+            <span class="t-muted">Status Perangkat:</span>
+            <span id="esp32-diag-status" class="font-bold font-mono">OFFLINE</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="t-muted">Device ID:</span>
+            <span id="esp32-diag-id" class="font-mono">—</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="t-muted">Wi-Fi RSSI / Sinyal:</span>
+            <span id="esp32-diag-rssi" class="font-mono">—</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="t-muted">Free Heap / Memori:</span>
+            <span id="esp32-diag-heap" class="font-mono">—</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="t-muted">Uptime:</span>
+            <span id="esp32-diag-uptime" class="font-mono">—</span>
+          </div>
+        </div>
+
+        <button onclick="window.saveAndConnectEsp32()" class="btn-primary w-full py-3 text-xs flex items-center justify-center gap-2">
+          <i class="fas fa-plug"></i><span>SIMPAN &amp; HUBUNGKAN</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -1510,88 +1574,81 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   }
 
   /* ================================================================== */
-  /*  BLUETOOTH — MICRO:BIT                                              */
+  /*  ESP32 WI-FI CLIENT ADAPTER                                        */
   /* ================================================================== */
-  $('btn-conn-bt').onclick = async () => {
-    try {
-      if (!navigator.bluetooth) {
-        throw new Error(state.lang === 'id' 
-          ? "Browser tidak mendukung Web Bluetooth (gunakan Google Chrome/Edge di desktop via localhost/HTTPS)."
-          : "Browser does not support Web Bluetooth (use Google Chrome/Edge on desktop via localhost/HTTPS).");
-      }
-      setPill($('status-bt'), 'warn', "BT: CONNECTING...");
-      state.device = await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: "BBC micro:bit" }],
-        optionalServices: [UART_SERVICE_UUID]
-      });
+  window.esp32Client = new Esp32Client({
+    host: localStorage.getItem('esp32_host') || 'http://192.168.4.1',
+    simulationMode: localStorage.getItem('esp32_sim') === 'true'
+  });
 
-      state.device.addEventListener("gattserverdisconnected", () => {
-        state.bleConnected = false; updateBLEUI();
-        logActivity("fas fa-xmark", "background:rgba(239,68,68,.15);color:#ef4444", "BT Disconnected", "Micro:bit terputus.");
-        showToast(state.lang === 'id' ? "Micro:bit terputus!" : "Micro:bit disconnected!");
-      });
+  // Sinkronisasi status klien ke antarmuka (pill & modal)
+  window.esp32Client.onStatusChange((ev) => {
+    updateEsp32UI(ev);
+  });
 
-      const server = await state.device.gatt.connect();
-      const service = await server.getPrimaryService(UART_SERVICE_UUID);
+  function updateEsp32UI(ev) {
+    const pill = $('status-esp32');
+    const diagStatus = $('esp32-diag-status');
+    const diagId = $('esp32-diag-id');
+    const diagRssi = $('esp32-diag-rssi');
+    const diagHeap = $('esp32-diag-heap');
+    const diagUptime = $('esp32-diag-uptime');
 
-      state.txChar = await service.getCharacteristic(UART_TX_CHARACTERISTIC_UUID);
-      state.rxChar = await service.getCharacteristic(UART_RX_CHARACTERISTIC_UUID);
+    const st = ev.status;
+    if (pill) {
+      if (st === 'READY') setPill(pill, 'blue', 'ESP32: READY');
+      else if (st === 'BUSY') setPill(pill, 'warn', 'ESP32: BUSY');
+      else if (st === 'SIMULATED') setPill(pill, 'on', 'ESP32: SIMULATED');
+      else if (st === 'CONNECTING') setPill(pill, 'warn', 'ESP32: CONNECTING...');
+      else setPill(pill, 'off', 'ESP32: OFFLINE');
+    }
 
-      await state.txChar.startNotifications();
-      state.txChar.addEventListener("characteristicvaluechanged", handleBTEReceive);
+    if (diagStatus) diagStatus.innerText = st;
+    const telem = window.esp32Client.lastTelemetry;
+    if (telem) {
+      if (diagId) diagId.innerText = telem.deviceId || '—';
+      if (diagRssi) diagRssi.innerText = telem.wifiRssi ? `${telem.wifiRssi} dBm` : '—';
+      if (diagHeap) diagHeap.innerText = telem.freeHeap ? `${(telem.freeHeap / 1024).toFixed(1)} KB` : '—';
+      if (diagUptime) diagUptime.innerText = telem.uptimeSec ? `${telem.uptimeSec}s` : '—';
+    }
+  }
 
-      state.bleConnected = true; updateBLEUI();
-      showToast("Micro:bit Connected!");
-      logActivity("fab fa-bluetooth-b", "background:rgba(59,130,246,.15);color:#3b82f6", "Bluetooth Active", "Terhubung ke Micro:bit");
-    } catch (e) {
-      updateBLEUI();
-      if (e && (e.name === 'NotFoundError' || /cancelled/i.test(e.message))) {
-        showToast(state.lang === 'id' ? "Pencarian Bluetooth dibatalkan." : "Bluetooth pairing cancelled.");
-      } else {
-        showToast((state.lang === 'id' ? "Gagal konek Bluetooth: " : "Bluetooth error: ") + e.message);
-      }
+  window.pingEsp32 = async () => {
+    const host = ($('esp32-host-input')?.value || '').trim();
+    if (host) window.esp32Client.configure({ host });
+    showToast(state.lang === 'id' ? "Memeriksa status ESP32..." : "Checking ESP32 status...");
+    const res = await window.esp32Client.checkHealth();
+    if (res.ok) {
+      showToast(state.lang === 'id' ? `ESP32 Terhubung! (${res.telemetry.deviceId})` : `ESP32 Connected! (${res.telemetry.deviceId})`);
+      logActivity("fas fa-wifi", "background:rgba(34,197,94,.15);color:#22c55e", "ESP32 Terhubung", `Host: ${window.esp32Client.host}`);
+    } else {
+      showToast((state.lang === 'id' ? "ESP32 tidak merespons: " : "ESP32 unreachable: ") + (res.error || 'Offline'));
     }
   };
 
-  $('btn-dis-bt').onclick = () => { if (state.device) state.device.gatt.disconnect(); };
+  window.toggleEsp32Sim = (isSim) => {
+    window.esp32Client.setSimulation(isSim);
+    localStorage.setItem('esp32_sim', isSim ? 'true' : 'false');
+    showToast(isSim ? "Mode Simulasi Aktif (Virtual Hardware)" : "Mode Simulasi Nonaktif");
+  };
 
-  function updateBLEUI() {
-    $('btn-conn-bt').disabled = state.bleConnected;
-    $('btn-dis-bt').disabled = !state.bleConnected;
-    setPill($('status-bt'), state.bleConnected ? 'blue' : 'off', state.bleConnected ? "BT: ONLINE" : "BT: OFFLINE");
-  }
+  window.saveAndConnectEsp32 = async () => {
+    const host = ($('esp32-host-input')?.value || '').trim();
+    const isSim = $('esp32-sim-toggle')?.checked;
+    window.esp32Client.configure({ host, simulationMode: isSim });
+    localStorage.setItem('esp32_host', host);
+    localStorage.setItem('esp32_sim', isSim ? 'true' : 'false');
+    await window.pingEsp32();
+    window.closeModal('esp32-modal');
+  };
 
-  async function sendToMicrobit(payloadStr) {
-    if (!state.rxChar) return;
-    try {
-      await state.rxChar.writeValue(new TextEncoder().encode(payloadStr + "\n"));
-      logActivity("fas fa-paper-plane", "background:rgba(148,163,184,.18);color:var(--muted)", "Kirim ke Micro:bit", `Data: ${payloadStr}`);
-    } catch (e) { console.error(e); }
-  }
-
-  window.changeSortingMode = (newMode) => {
-    const modeCmd = newMode.toLowerCase();
-    sendToMicrobit(modeCmd);
+  window.changeSortingMode = async (newMode) => {
     showToast(`Mode diubah ke: ${newMode}`);
     logActivity("fas fa-right-left", "background:rgba(168,85,247,.15);color:#a855f7", "Mode Change Sent", `Mode: ${newMode}`);
+    try {
+      await window.esp32Client.sendModeCommand(newMode);
+    } catch (e) { console.warn(e); }
   };
-
-  function handleBTEReceive(event) {
-    let arr = [];
-    for (let i = 0; i < event.target.value.byteLength; i++) arr.push(event.target.value.getUint8(i));
-    state.bleBuffer += String.fromCharCode.apply(null, arr);
-
-    if (state.bleBuffer.includes('\n')) {
-      let msgs = state.bleBuffer.split('\n');
-      state.bleBuffer = msgs.pop();
-      msgs.forEach(msg => {
-        let cleanMsg = msg.trim().toLowerCase();
-        if (cleanMsg && state.pendingDetection && cleanMsg === state.pendingDetection) {
-          triggerSortAction(state.pendingDetection);
-        }
-      });
-    }
-  }
 
   /* ================================================================== */
   /*  TEACHABLE MACHINE AI                                               */
@@ -1876,17 +1933,29 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       else if (cLower.includes('merah') || cLower.includes('red')) colorCode = 'merah';
 
       if (colorCode) {
-        // Tanpa micro:bit = mode mandiri: langsung catat, tanpa tunggu handshake
-        if (!state.rxChar) {
-          standaloneSortAction(colorCode);
-        } else {
-          state.isCoolingDown = true;
-          state.pendingDetection = colorCode;
-          state.pendingStartTime = Date.now();
-          state.pendingMode = $('mode-selector').value;
-          sendToMicrobit(colorCode);
-          state.timeoutTimer = setTimeout(() => { executeTimeout(colorCode); }, 12000);
-        }
+        state.isCoolingDown = true;
+        state.pendingDetection = colorCode;
+        state.pendingStartTime = Date.now();
+        state.pendingMode = $('mode-selector').value;
+
+        // Watchdog timeout 12s
+        state.timeoutTimer = setTimeout(() => { executeTimeout(colorCode); }, 12000);
+
+        // Eksekusi via ESP32 Wi-Fi Client Adapter
+        window.esp32Client.sendSortingCommand({
+          color: colorCode,
+          mode: state.pendingMode,
+          objectType: 'CYLINDER_CAP'
+        }).then(res => {
+          if (res && res.ok) {
+            triggerSortAction(colorCode, res);
+          } else {
+            executeTimeout(colorCode, (res && res.errorCode) || 'ERR_ESP32_REJECTED');
+          }
+        }).catch(err => {
+          console.warn('ESP32 dispatch error:', err);
+          executeTimeout(colorCode, 'ERR_COMM_EXCEPTION');
+        });
       }
     }
   }
@@ -1966,9 +2035,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     showToast("Sukses: Force Timeout Dieksekusi!");
   };
 
-  async function triggerSortAction(category) {
+  async function triggerSortAction(category, espRes = {}) {
     if (state.timeoutTimer) clearTimeout(state.timeoutTimer);
-    const durationMs = state.pendingStartTime ? (Date.now() - state.pendingStartTime) : null;
+    const durationMs = espRes.durationMs || (state.pendingStartTime ? (Date.now() - state.pendingStartTime) : null);
     const startedMode = state.pendingMode;
 
     state.pendingDetection = null;
@@ -1985,6 +2054,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     const timeStr = now.toLocaleTimeString('id-ID');
     const dateTimeStr = formatDateTime(now);
     const properColorName = category.charAt(0).toUpperCase() + category.slice(1);
+    const execStatus = espRes.executionStatus || (window.esp32Client.isSimulated() ? 'simulated_esp32' : 'confirmed_esp32_wifi');
+    const espDeviceId = espRes.esp32DeviceId || (window.esp32Client.lastTelemetry && window.esp32Client.lastTelemetry.deviceId) || 'VERNOVA-ESP32';
+    const cmdId = espRes.commandId || `CMD_${nowMs}`;
 
     state.excelLogs.push({
       datetime: dateTimeStr,
@@ -2000,20 +2072,22 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     updateUIStats(); updateChart();
 
     pushFeed({ icon: 'fas fa-check', style: feedStyleFor(category),
-      title: `${properColorName} Tersortir`,
-      desc: `${dateTimeStr} · ${currentMode}`,
+      title: `${properColorName} Tersortir (${espRes.simulated ? 'SIM' : 'ESP32'})`,
+      desc: `${dateTimeStr} · ${currentMode} · ${formatDuration(durationMs)}`,
       ts: nowMs, kind: 'data', key: `ok|${category}|${nowMs}|${currentMode}` });
 
     if (state.db) {
       try {
         await push(ref(state.db, `${state.currentPath}/${category}`), {
           runId: `sort_${nowMs}_${Math.random().toString(36).slice(2, 7)}`,
+          commandId: cmdId,
+          esp32DeviceId: espDeviceId,
           timestamp: nowMs,
           detectedColor: properColorName,
           warna: properColorName,
           mode: currentMode,
           commandStatus: 'sent',
-          executionStatus: 'confirmed_ble',
+          executionStatus: execStatus,
           sortResult: 'success',
           status: 'Berhasil',
           duration: durationMs || 0,
@@ -2146,12 +2220,11 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     state.pendingMode = null;
     state.isCoolingDown = false;
 
-    sendToMicrobit(c);
+    const currentMode = $('mode-selector').value;
+    window.esp32Client.sendSortingCommand({ color: c, mode: currentMode }).catch(e => console.warn(e));
 
     state.sortingData[c]++;
     state.sortingData.total++;
-
-    const currentMode = $('mode-selector').value;
     const nowMs = Date.now();
     const now = new Date(nowMs);
     const timeStr = now.toLocaleTimeString('id-ID');

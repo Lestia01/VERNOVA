@@ -5,6 +5,40 @@ Format mengikuti prinsip [Keep a Changelog](https://keepachangelog.com/id/1.0.0/
 
 ---
 
+## [2.2.0] - 2026-11-15
+
+### Ditambahkan (Added)
+- **Modul Klien Komunikasi ESP32 Wi-Fi (`assets/js/esp32-client.js`):**
+  - Adapter HTTP REST API terpadu (`/api/status`, `/api/sort`, `/api/mode`, `/api/stop`).
+  - Mode simulasi mock (*virtual hardware*) bawaan untuk demo offline dan Vercel cloud tanpa hardware fisik.
+  - Listener reaktif event perubahan status telemetri perangkat.
+- **Modal Konfigurasi ESP32 Wi-Fi (`index.html`):**
+  - Input kustom alamat IP/Host ESP32 dengan preset SoftAP (`192.168.4.1`) dan proxy lokal.
+  - Tombol uji latensi ("Test Ping"), toggle switch Mode Simulasi, dan telemetri live (RSSI, Free Heap, Uptime).
+- **Backend Proxy `/api/esp32` (`server.ps1`):**
+  - Reverse proxy perantara untuk meneruskan instruksi ke ESP32 pada subnet LAN lokal dengan dukungan CORS penuh.
+- **Firmware Referensi ESP32 C++ Arduino (`firmware/esp32_vernova_sorting/esp32_vernova_sorting.ino`):**
+  - Mendukung hotspot mandiri SoftAP (`VERNOVA-ROBOT` / `192.168.4.1`) dan Station mode router sekolah.
+  - Server HTTP REST port 80 dengan header CORS dan kontrol PWM servo pemilah (Flap & Arm).
+- **Suite Pengujian Unit Klien ESP32 (`tests/esp32_client.test.js`):**
+  - 8 pengujian otomatis baru mencakup validasi input, sanitasi host, transisi state machine, dan penanganan offline.
+  - Total pengujian unit proyek meningkat menjadi 28 passing (0 gagal).
+- **Suite Dokumentasi Migrasi ESP32 (`docs/`):**
+  - `ESP32_WIFI_ARCHITECTURE.md`, `ESP32_COMMUNICATION_PROTOCOL.md`, `ESP32_MIGRATION_PLAN.md`, `ESP32_SECURITY_REVIEW.md`, `ESP32_TEST_PLAN.md`, `ESP32_TEST_RESULTS.md`, `ESP32_SETUP_GUIDE.md`.
+
+### Diubah (Changed)
+- **Antarmuka Pengguna (`index.html`):**
+  - Mengganti status pill `#status-bt` menjadi `#status-esp32`.
+  - Mengganti tombol koneksi Bluetooth menjadi tombol `#btn-conn-esp32` berikon Wi-Fi.
+  - Memperbarui kartu alur data arsitektur sistem dari BLE UART ke ESP32 Wi-Fi REST Bridge.
+- **Pipeline AI Vision & Manual QC (`index.html`):**
+  - Mengarahkan inferensi warna Teachable Machine (`confidence > 0.85`) ke `esp32Client.sendSortingCommand`.
+  - Memperbarui skema penulisan log Firebase RTDB dengan metadata `esp32DeviceId`, `commandId`, dan `executionStatus`.
+- **Pustaka Pengetahuan R-AI (`rai-knowledge.js`):**
+  - Menyelaraskan informasi mikrokontroler robot ke ESP32 Wi-Fi REST API.
+
+---
+
 ## [2.1.0] - 2026-11-11
 
 ### Ditambahkan (Added)
