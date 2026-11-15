@@ -7,7 +7,9 @@ const {
   computeStats,
   extractAllRecords,
   getDayBoundsWIB,
-  formatWIB
+  formatWIB,
+  isAnalyticQuery,
+  isRobotControlCommand
 } = require('../assets/js/smart-data-assistant.js');
 
 test('VERNOVA Smart Data Assistant - Zero AI Rule-Based Engine', async (t) => {
@@ -199,5 +201,180 @@ test('VERNOVA Smart Data Assistant - Zero AI Rule-Based Engine', async (t) => {
     const hRes = assistant.processQuery('Bantuan');
     assert.equal(hRes.intent, 'HELP');
     assert.ok(hRes.answer.includes('Analitik Data yang Dapat Anda Tanyakan'));
+  });
+
+  // =========================================================================
+  // MANDATORY REGRESSION TESTS (BUG 7: 10 REQUIRED SCENARIOS + FOLLOW-UP)
+  // =========================================================================
+
+  await t.test('14. Regresi Skenario 1: "Ganti mode ke Arm" terdeteksi sebagai kontrol hardware', () => {
+    const query = 'Ganti mode ke Arm';
+    assert.equal(isRobotControlCommand(query), true, 'Harus terdeteksi sebagai perintah kontrol');
+    assert.equal(isAnalyticQuery(query), false, 'Tidak boleh terdeteksi sebagai kueri analitik');
+  });
+
+  await t.test('15. Regresi Skenario 2: "Analisis mode Arm" terdeteksi sebagai analitik dan tidak mengubah mode', () => {
+    const query = 'Analisis mode Arm';
+    assert.equal(isAnalyticQuery(query), true, 'Harus terdeteksi sebagai kueri analitik');
+    assert.equal(isRobotControlCommand(query), false, 'Tidak boleh memicu kontrol hardware');
+
+    const res = assistant.processQuery(query, { smart_factory: mockFirebaseData.smart_factory });
+    assert.equal(res.intent, 'MODE_ERROR_RATE');
+    assert.ok(res.answer.includes('Analisis Error Mode Arm'));
+    assert.ok(!res.answer.toLowerCase().includes('mode berhasil diubah'));
+  });
+
+  await t.test('16. Regresi Skenario 3: "Mode Arm dan Servo mana lebih efektif?" menghasilkan komparasi multi-metrik', () => {
+    const query = 'Mode Arm dan Servo mana lebih efektif?';
+    assert.equal(isAnalyticQuery(query), true);
+    assert.equal(isRobotControlCommand(query), false);
+
+    const intent = detectIntent(normalizeText(query));
+    assert.equal(intent, 'COMPARE_MODE_EFFECTIVENESS');
+
+    const res = assistant.processQuery(query, { smart_factory: mockFirebaseData.smart_factory });
+    assert.equal(res.intent, 'COMPARE_MODE_EFFECTIVENESS');
+    // Verifikasi 8 metrik riil pada perbandingan
+    assert.ok(res.answer.includes('Total Percobaan (Attempts)'));
+    assert.ok(res.answer.includes('Jumlah Berhasil'));
+    assert.ok(res.answer.includes('Jumlah Gagal / Timeout'));
+    assert.ok(res.answer.includes('Tingkat Keberhasilan (Success Rate)'));
+    assert.ok(res.answer.includes('Tingkat Kegagalan (Error Rate)'));
+    assert.ok(res.answer.includes('Rata-rata Durasi Siklus'));
+    assert.ok(res.answer.includes('Salah Sortir (Missort)'));
+    assert.ok(res.basis.includes('Basis Perhitungan:'));
+  });
+
+  await t.test('17. Regresi Skenario 4: "Berapa error akibat mode Arm?" dianalisis tanpa kontrol', () => {
+    const query = 'Berapa error akibat mode Arm?';
+    assert.equal(isAnalyticQuery(query), true);
+    assert.equal(isRobotControlCommand(query), false);
+
+    const res = assistant.processQuery(query, { smart_factory: mockFirebaseData.smart_factory });
+    assert.ok(res.intent === 'ERROR_BY_MODE' || res.intent === 'MODE_ERROR_RATE');
+    assert.ok(res.answer.includes('Mode Arm'));
+    assert.ok(res.answer.includes('2')); // 2 kegagalan pada mock data
+  });
+
+  await t.test('18. Regresi Skenario 5: "Kapan saja error terjadi?" menghasilkan daftar seluruh error kronologis', () => {
+    const queries = ['Kapan saja error terjadi?', 'kapan saja errornya terjadi', 'riwayat error'];
+    for (const q of queries) {
+      const intent = detectIntent(normalizeText(q));
+      assert.equal(intent, 'ERROR_HISTORY', `Query "${q}" harus terdeteksi sebagai ERROR_HISTORY`);
+
+      const res = assistant.processQuery(q, { smart_factory: mockFirebaseData.smart_factory });
+      assert.equal(res.intent, 'ERROR_HISTORY');
+      assert.ok(res.answer.includes('Riwayat Seluruh Kejadian Error'));
+      assert.ok(res.answer.includes('WIB'));
+      assert.ok(res.answer.includes('ERR_WATCHDOG_12S'));
+      assert.ok(res.answer.includes('r-08')); // error terbaru di atas
+      assert.ok(res.answer.includes('r-07'));
+    }
+  });
+
+  await t.test('19. Regresi Skenario 6: "Kapan error terakhir?" hanya menampilkan 1 error terbaru', () => {
+    const query = 'Kapan error terakhir?';
+    const intent = detectIntent(normalizeText(query));
+    assert.equal(intent, 'ERROR_LATEST');
+
+    const res = assistant.processQuery(query, { smart_factory: mockFirebaseData.smart_factory });
+    assert.equal(res.intent, 'ERROR_LATEST');
+    assert.ok(res.answer.includes('Error Terakhir yang Tercatat'));
+    assert.ok(res.answer.includes('r-08')); // Hanya r-08 (terbaru)
+    assert.ok(!res.answer.includes('r-07')); // r-07 adalah error sebelum terakhir
+  });
+
+  await t.test('20. Regresi Skenario 7: Mode dengan 0 percobaan menghasilkan N/A (bukan 0% dan bukan bebas error)', () => {
+    // Dataset di mana Servo belum pernah digunakan (0 percobaan)
+    const mockZeroServoData = {
+      smart_factory: {
+        sorting_line: {
+          merah: {
+            'm1': { runId: 'r-10', color: 'merah', mode: 'Arm', sortResult: 'success', timestamp: now - 500000 }
+          },
+          gagal: {
+            'g1': { runId: 'r-11', detectedColor: 'biru', mode: 'Arm', sortResult: 'error', errorCode: 'ERR_TIMEOUT', timestamp: now - 300000 }
+          }
+        }
+      }
+    };
+
+    const records = extractAllRecords(mockZeroServoData);
+    const stats = computeStats(records);
+
+    assert.equal(stats.modes.Servo, 0);
+    assert.equal(stats.servoErrorRate, null, 'Error rate servo dengan 0 percobaan harus bernilai null');
+
+    const res = assistant.processQuery('Berapa error rate mode servo?', { smart_factory: mockZeroServoData.smart_factory });
+    assert.ok(res.answer.includes('N/A') || res.answer.includes('Belum dapat dihitung'));
+    assert.ok(!res.answer.includes('**0%**'));
+    assert.ok(res.answer.includes('tidak dapat disimpulkan bebas error'));
+
+    // Komparasi efektivitas dengan mode 0 percobaan juga harus menyatakan belum cukup data
+    const compRes = assistant.processQuery('Mode Arm dan Servo mana lebih efektif?', { smart_factory: mockZeroServoData.smart_factory });
+    assert.ok(compRes.answer.includes('Belum cukup data untuk membandingkan efektivitas'));
+  });
+
+  await t.test('21. Regresi Skenario 8: Database null atau unreachable menghasilkan informasi transparan', () => {
+    const resNull = assistant.processQuery('Berapa total produk?', null);
+    assert.equal(resNull.intent, 'DATA_UNAVAILABLE');
+    assert.ok(resNull.answer.includes('Data tidak tersedia'));
+
+    const resUnreachable = assistant.processQuery('Berapa error rate?', { unreachable: true });
+    assert.equal(resUnreachable.intent, 'DATA_UNAVAILABLE');
+    assert.ok(resUnreachable.answer.includes('Data tidak tersedia'));
+  });
+
+  await t.test('22. Regresi Skenario 9: Kueri analitik dengan kata "Arm" atau "Servo" TIDAK PERNAH memicu kontrol robot', () => {
+    const analyticQueries = [
+      'Analisa mode Arm dan Servo mana lebih efektif?',
+      'Berapa error akibat mode Arm?',
+      'Error rate mode Servo',
+      'Apakah mode Arm sering error?',
+      'Bandingkan performa mode Arm dan mode Servo',
+      'Evaluasi mode Servo',
+      'Berapa kali mode Arm digunakan?'
+    ];
+
+    for (const q of analyticQueries) {
+      assert.equal(isAnalyticQuery(q), true, `Query "${q}" harus terdeteksi analitik`);
+      assert.equal(isRobotControlCommand(q), false, `Query "${q}" TIDAK BOLEH memicu robot control command!`);
+    }
+  });
+
+  await t.test('23. Regresi Skenario 10: Pertanyaan ambigu meminta klarifikasi dan tidak mengubah mode', () => {
+    const ambiguousInputs = ['mode arm', 'mode servo', 'arm', 'servo'];
+
+    for (const amb of ambiguousInputs) {
+      assert.equal(isRobotControlCommand(amb), false, `Input ambigu "${amb}" tidak boleh memicu perintah kontrol`);
+      const res = assistant.processQuery(amb, { smart_factory: mockFirebaseData.smart_factory });
+      assert.equal(res.intent, 'AMBIGUOUS_CLARIFICATION');
+      assert.ok(res.answer.includes('Klarifikasi Diperlukan'));
+      assert.ok(res.answer.includes('mengubah mode fisik robot'));
+      assert.ok(res.answer.includes('menganalisis data performa'));
+    }
+  });
+
+  await t.test('24. Regresi Skenario 11: Pertanyaan lanjutan kontekstual (Follow-up) bekerja tanpa salah kontrol', () => {
+    const sessionAssistant = new SmartDataAssistant();
+    const dataCtx = { smart_factory: mockFirebaseData.smart_factory };
+
+    // Turn 1: Tanya error rate mode Servo
+    const turn1 = sessionAssistant.processQuery('Berapa error rate mode servo?', dataCtx);
+    assert.equal(turn1.intent, 'MODE_ERROR_RATE');
+    assert.ok(turn1.answer.includes('Mode Servo'));
+
+    // Turn 2: Follow-up singkat "Bagaimana dengan Arm?"
+    // Harus dipahami sebagai analitik error rate mode Arm, BUKAN berganti mode fisik!
+    assert.equal(isRobotControlCommand('Bagaimana dengan Arm?'), false);
+    const turn2 = sessionAssistant.processQuery('Bagaimana dengan Arm?', dataCtx);
+    assert.equal(turn2.intent, 'MODE_ERROR_RATE');
+    assert.ok(turn2.answer.includes('Mode Arm'));
+    assert.ok(turn2.answer.includes('40%'));
+
+    // Turn 3: Follow-up "Bandingkan keduanya"
+    const turn3 = sessionAssistant.processQuery('Bandingkan keduanya', dataCtx);
+    assert.equal(turn3.intent, 'COMPARE_MODE_EFFECTIVENESS');
+    assert.ok(turn3.answer.includes('Perbandingan Efektivitas Mode Operasi'));
   });
 });

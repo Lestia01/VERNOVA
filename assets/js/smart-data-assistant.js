@@ -132,6 +132,38 @@
     return normalizedTokens.join(' ');
   }
 
+  function isAnalyticQuery(input) {
+    if (!input || typeof input !== 'string') return false;
+    const raw = input.toLowerCase().trim();
+    if (raw.includes('?')) return true;
+
+    const norm = normalizeText(input);
+    const analyticWords = [
+      'analisis', 'analisa', 'evaluasi', 'bandingkan', 'perbandingan', 'komparasi',
+      'efektif', 'efektivitas', 'mana', 'lebih', 'bagus', 'baik',
+      'berapa', 'kapan', 'mengapa', 'kenapa', 'apakah', 'bagaimana', 'gimana', 'siapa',
+      'paling', 'terbanyak', 'tersedikit', 'sering', 'jarang',
+      'daftar', 'list', 'riwayat', 'histori', 'log', 'rekap', 'ringkasan', 'summary',
+      'rate', 'persentase', 'rasio', 'tingkat', 'jumlah', 'total',
+      'status', 'kondisi', 'kesehatan', 'health', 'info', 'informasi', 'tren', 'trend',
+      'cek', 'tampilkan', 'lihat'
+    ];
+
+    const tokens = norm.split(/\s+/);
+    for (const w of analyticWords) {
+      if (tokens.includes(w) || raw.includes(w)) return true;
+    }
+    return false;
+  }
+
+  function isRobotControlCommand(input) {
+    if (!input || typeof input !== 'string') return false;
+    if (isAnalyticQuery(input)) return false;
+    const raw = input.toLowerCase().trim();
+    const controlPattern = /^\s*(tolong\s*)?(ubah|ganti|set|switch|pindah)\s+(mode\s+(kerja\s+)?(ke\s+)?|ke\s+mode\s+)(arm|servo)\s*$/i;
+    return controlPattern.test(raw);
+  }
+
   // =========================================================================
   // 3. INTENT DEFINITIONS & PATTERN MATCHING
   // =========================================================================
@@ -199,16 +231,43 @@
       ]
     },
 
+    // Category C: Mode Effectiveness & Comparison (must precede general MODE and ERROR intents)
+    {
+      id: 'COMPARE_MODE_EFFECTIVENESS',
+      category: 'MODE',
+      patterns: [
+        /\b(mana\s+lebih\s+efektif|lebih\s+efektif\s+mana|perbandingan\s+efektivitas|efektivitas.*(mode|arm|servo)|komparasi.*(mode|arm|servo)|(servo|arm).*vs.*(servo|arm).*efektif|evaluasi.*mode.*(servo|arm)|analis(a|is).*mode.*(servo|arm).*efektif|bandingkan.*(efektivitas|performa|kinerja).*(servo|arm))\b/i,
+        /\b(mode\s+(arm|servo)\s+dan\s+(arm|servo)\s+mana\s+lebih\s+efektif|mode\s+(arm|servo)\s+atau\s+(arm|servo)\s+mana\s+lebih\s+efektif|mana\s+lebih\s+efektif.*(arm|servo))\b/i,
+        /\b(efektivitas\s+mode|mana\s+lebih\s+baik.*(arm|servo)|(arm|servo).*mana\s+lebih\s+bagus|bandingkan\s+keduanya|bandingkan\s+efektivitas)\b/i
+      ]
+    },
+
     // Category C: Mode-specific Error Rate (must precede general ERROR_RATE)
     {
       id: 'MODE_ERROR_RATE',
       category: 'MODE',
       patterns: [
-        /\b(error rate.*(servo|arm)|tingkat kegagalan.*(servo|arm)|persentase error.*(servo|arm)|error.*(servo|arm).*rate)\b/
+        /\b(analis(a|is)\s+mode\s+(arm|servo)|evaluasi\s+mode\s+(arm|servo))\b/i,
+        /\b(error rate.*(servo|arm)|tingkat kegagalan.*(servo|arm)|persentase error.*(servo|arm)|error.*(servo|arm).*rate)\b/i
       ]
     },
 
     // Category B: Error & Failure Analysis
+    {
+      id: 'ERROR_HISTORY',
+      category: 'ERROR',
+      patterns: [
+        /\b(kapan\s+saja\s+(error|kegagalan|gagal)|kapan\s+aja\s+(error|kegagalan|gagal)|kapan\s+saja\s+error(nya)?\s+terjadi|kapan\s+error(nya)?\s+terjadi|semua\s+(error|kegagalan)|seluruh\s+(error|kegagalan)|riwayat\s+(error|kegagalan)|histori\s+(error|kegagalan)|daftar\s+(seluruh|semua)\s+error|kapan\s+saja\s+terjadi\s+error)\b/i,
+        /\b(kapan\s+terjadinya\s+error|kapan\s+saja\s+error|kapan\s+aja\s+error|kapan\s+saja\s+errornya\s+terjadi)\b/i
+      ]
+    },
+    {
+      id: 'ERROR_BY_MODE',
+      category: 'ERROR',
+      patterns: [
+        /\b(berapa\s+error\s+(akibat|karena|pada|di)\s+mode\s+(arm|servo)|error\s+akibat\s+mode\s+(arm|servo)|jumlah\s+error\s+mode\s+(arm|servo))\b/i
+      ]
+    },
     {
       id: 'ERROR_TODAY',
       category: 'ERROR',
@@ -389,7 +448,12 @@
     }
 
     // Secondary fallback keywords
+    if (normalizedQuery.includes('efektif') || normalizedQuery.includes('efektivitas') || (normalizedQuery.includes('bandingkan') && !normalizedQuery.includes('error') && !normalizedQuery.includes('gagal') && (normalizedQuery.includes('arm') || normalizedQuery.includes('servo')))) {
+      return 'COMPARE_MODE_EFFECTIVENESS';
+    }
+
     if (normalizedQuery.includes('error') || normalizedQuery.includes('gagal')) {
+      if (normalizedQuery.includes('kapan saja') || normalizedQuery.includes('kapan aja') || normalizedQuery.includes('riwayat') || normalizedQuery.includes('histori') || normalizedQuery.includes('semua') || normalizedQuery.includes('seluruh') || normalizedQuery.includes('kapan error')) return 'ERROR_HISTORY';
       if (normalizedQuery.includes('rate') || normalizedQuery.includes('persentase')) return 'ERROR_RATE';
       if (normalizedQuery.includes('mode') || normalizedQuery.includes('servo') || normalizedQuery.includes('arm')) return 'ERROR_MOST_BY_MODE';
       if (normalizedQuery.includes('terakhir') || normalizedQuery.includes('kapan')) return 'ERROR_LATEST';
@@ -556,7 +620,33 @@
     let latestRecord = null;
     let latestErrorRecord = null;
 
+    let servoDurationSum = 0, servoDurationCount = 0;
+    let armDurationSum = 0, armDurationCount = 0;
+    const missortsByMode = { Servo: 0, Arm: 0 };
+    let minTimestamp = Infinity, maxTimestamp = -Infinity;
+
     list.forEach(r => {
+      if (r.timestamp > 0) {
+        if (r.timestamp < minTimestamp) minTimestamp = r.timestamp;
+        if (r.timestamp > maxTimestamp) maxTimestamp = r.timestamp;
+      }
+
+      if (r.durationMs > 0) {
+        if (r.mode === 'Servo') {
+          servoDurationSum += r.durationMs;
+          servoDurationCount++;
+        } else if (r.mode === 'Arm') {
+          armDurationSum += r.durationMs;
+          armDurationCount++;
+        }
+      }
+
+      const isMissort = Boolean(r.isMissort || r.errorCode === 'ERR_MISSORT' || String(r.status).toLowerCase().includes('missort'));
+      if (isMissort) {
+        const m = (r.mode === 'Servo' || r.mode === 'Arm') ? r.mode : 'Servo';
+        missortsByMode[m] = (missortsByMode[m] || 0) + 1;
+      }
+
       if (r.isError) {
         errorCount++;
         const m = (r.mode === 'Servo' || r.mode === 'Arm') ? r.mode : 'Lainnya';
@@ -587,11 +677,14 @@
       }
     });
 
-    const errorRate = total > 0 ? (errorCount / total) * 100 : 0;
+    const errorRate = total > 0 ? Math.round(((errorCount / total) * 100) * 10) / 10 : null;
     const servoTotal = modes.Servo || 0;
     const armTotal = modes.Arm || 0;
-    const servoErrorRate = servoTotal > 0 ? ((modeErrors.Servo || 0) / servoTotal) * 100 : 0;
-    const armErrorRate = armTotal > 0 ? ((modeErrors.Arm || 0) / armTotal) * 100 : 0;
+    const servoErrorRate = servoTotal > 0 ? Math.round(((modeErrors.Servo || 0) / servoTotal) * 100 * 10) / 10 : null;
+    const armErrorRate = armTotal > 0 ? Math.round(((modeErrors.Arm || 0) / armTotal) * 100 * 10) / 10 : null;
+
+    const avgDurationServo = servoDurationCount > 0 ? Math.round(servoDurationSum / servoDurationCount) : null;
+    const avgDurationArm = armDurationCount > 0 ? Math.round(armDurationSum / armDurationCount) : null;
 
     // Highest & lowest sorted colors
     const colorEntries = [
@@ -617,14 +710,19 @@
       total,
       successCount,
       errorCount,
-      errorRate: Math.round(errorRate * 10) / 10,
+      errorRate,
       colors,
       mostColor,
       leastColor,
       modes,
       modeErrors,
-      servoErrorRate: Math.round(servoErrorRate * 10) / 10,
-      armErrorRate: Math.round(armErrorRate * 10) / 10,
+      servoErrorRate,
+      armErrorRate,
+      avgDurationServo,
+      avgDurationArm,
+      missortsByMode,
+      minTimestamp: minTimestamp !== Infinity ? minTimestamp : null,
+      maxTimestamp: maxTimestamp !== -Infinity ? maxTimestamp : null,
       errorCodes,
       hourlyDistribution,
       busiestHour,
@@ -641,7 +739,32 @@
     constructor(options = {}) {
       this.options = options;
       this.name = 'VERNOVA Smart Data Assistant';
-      this.version = '1.0.0-zero-llm';
+      this.version = '1.1.0-zero-llm';
+      this.context = {
+        lastIntent: null,
+        lastMode: null,
+        lastColor: null,
+        lastTimeframe: null,
+        lastQuery: null
+      };
+    }
+
+    setContext(ctx = {}) {
+      this.context = { ...this.context, ...ctx };
+    }
+
+    getContext() {
+      return { ...this.context };
+    }
+
+    resetContext() {
+      this.context = {
+        lastIntent: null,
+        lastMode: null,
+        lastColor: null,
+        lastTimeframe: null,
+        lastQuery: null
+      };
     }
 
     /**
@@ -660,7 +783,52 @@
         };
       }
 
-      const intent = detectIntent(normalized);
+      // 1. Validasi ketersediaan basis data (Bug 3 & 8)
+      if (contextData === null || contextData.unreachable || (contextData.smart_factory === null && !contextData.excelLogs && !contextData.history && !contextData.records && contextData.dbUnreachable)) {
+        return {
+          intent: 'DATA_UNAVAILABLE',
+          answer: '⚠️ **Data tidak tersedia:** Basis data Firebase/lokal saat ini tidak terjangkau atau bernilai null. Sistem tidak dapat menampilkan analitik data yang akurat tanpa sumber log yang sah.',
+          basis: 'Basis Data: Koneksi basis data terputus atau tidak terjangkau (null/unreachable).',
+          suggestions: ['Status ESP32', 'Hubungkan database', 'Panduan sistem']
+        };
+      }
+
+      // 2. Deteksi pertanyaan ambigu (misal hanya menyebut "mode arm", "mode servo", "arm", "servo") (Bug 1 & 10)
+      if (/^\s*(mode\s+)?(arm|servo)\s*$/i.test(normalized)) {
+        const targetMode = normalized.includes('arm') ? 'Arm' : 'Servo';
+        return {
+          intent: 'AMBIGUOUS_CLARIFICATION',
+          answer: `❓ **Klarifikasi Diperlukan:**\nApakah Anda ingin **mengubah mode fisik robot** ke Mode ${targetMode}, atau **menganalisis data performa & error rate** Mode ${targetMode}?\n\n• Ketik *"Ganti mode ke ${targetMode}"* untuk kontrol aktuator fisik.\n• Ketik *"Analisis mode ${targetMode}"* untuk melihat statistik data performa.`,
+          basis: 'Sistem menahan aksi fisik untuk mencegah pergantian mode yang tidak disengaja.',
+          suggestions: [`Ganti mode ke ${targetMode}`, `Analisis mode ${targetMode}`, 'Bandingkan efektivitas mode']
+        };
+      }
+
+      // 3. Kontekstual Follow-up (Bug 6)
+      let intent = detectIntent(normalized);
+
+      if (/\b(bagaimana\s+dengan\s+arm|kalau\s+arm|gimana\s+(dengan\s+)?arm|arm\s+bagaimana)\b/i.test(normalized)) {
+        if (this.context.lastIntent === 'MODE_USAGE_COUNT' || this.context.lastIntent === 'MOST_USED_MODE') {
+          intent = 'MODE_USAGE_COUNT';
+        } else {
+          intent = 'MODE_ERROR_RATE';
+        }
+      } else if (/\b(bagaimana\s+dengan\s+servo|kalau\s+servo|gimana\s+(dengan\s+)?servo|servo\s+bagaimana)\b/i.test(normalized)) {
+        if (this.context.lastIntent === 'MODE_USAGE_COUNT' || this.context.lastIntent === 'MOST_USED_MODE') {
+          intent = 'MODE_USAGE_COUNT';
+        } else {
+          intent = 'MODE_ERROR_RATE';
+        }
+      } else if (/\b(bandingkan\s+keduanya|kalau\s+dibandingkan|bagaimana\s+kalau\s+dibandingkan)\b/i.test(normalized)) {
+        intent = 'COMPARE_MODE_EFFECTIVENESS';
+      } else if (/\b(bagaimana\s+kemarin|kalau\s+kemarin|gimana\s+kemarin)\b/i.test(normalized)) {
+        if (this.context.lastIntent === 'ERROR_TODAY' || this.context.lastIntent === 'ERROR_RATE') {
+          intent = 'COMPARE_DAYS';
+        } else {
+          intent = 'ACTIVITY_YESTERDAY';
+        }
+      }
+
       const records = extractAllRecords(contextData);
       let esp32 = contextData.esp32Status;
       if (!esp32 && typeof global !== 'undefined' && global.esp32Client) {
@@ -671,73 +839,125 @@
       esp32 = esp32 || {};
       const camera = contextData.cameraStatus || { active: true, fps: 30 };
 
+      let response = null;
+
       // Dispatch ke handler intent
       switch (intent) {
         case 'GREETING':
-          return this.handleGreeting();
+          response = this.handleGreeting();
+          break;
         case 'IDENTITY':
-          return this.handleIdentity();
+          response = this.handleIdentity();
+          break;
         case 'HELP':
-          return this.handleHelp();
+          response = this.handleHelp();
+          break;
         case 'TOTAL_SORTING':
-          return this.handleTotalSorting(records, normalized);
+          response = this.handleTotalSorting(records, normalized);
+          break;
         case 'SORTING_BY_COLOR':
-          return this.handleSortingByColor(records, normalized);
+          response = this.handleSortingByColor(records, normalized);
+          break;
         case 'MOST_SORTED_COLOR':
-          return this.handleMostSortedColor(records);
+          response = this.handleMostSortedColor(records);
+          break;
         case 'LEAST_SORTED_COLOR':
-          return this.handleLeastSortedColor(records);
+          response = this.handleLeastSortedColor(records);
+          break;
+        case 'ERROR_HISTORY':
+          response = this.handleErrorHistory(records);
+          break;
         case 'ERROR_LATEST':
-          return this.handleLatestError(records);
+          response = this.handleLatestError(records);
+          break;
         case 'ERROR_LIST':
-          return this.handleErrorList(records);
+          response = this.handleErrorList(records);
+          break;
         case 'ERROR_TODAY':
-          return this.handleErrorToday(records);
+          response = this.handleErrorToday(records);
+          break;
         case 'ERROR_RATE':
-          return this.handleErrorRate(records);
+          response = this.handleErrorRate(records);
+          break;
+        case 'ERROR_BY_MODE':
+          response = this.handleModeErrorRate(records, normalized);
+          break;
         case 'ERROR_MOST_BY_MODE':
         case 'ERROR_MODE_COMPARISON':
-          return this.handleErrorByMode(records, intent);
+          response = this.handleErrorByMode(records, intent);
+          break;
+        case 'COMPARE_MODE_EFFECTIVENESS':
+          response = this.handleCompareModeEffectiveness(records);
+          break;
         case 'ERROR_BY_TYPE':
-          return this.handleErrorByType(records);
+          response = this.handleErrorByType(records);
+          break;
         case 'ERROR_BY_COLOR':
-          return this.handleErrorByColor(records);
+          response = this.handleErrorByColor(records);
+          break;
         case 'ERROR_TREND':
-          return this.handleErrorTrend(records);
+          response = this.handleErrorTrend(records);
+          break;
         case 'MOST_USED_MODE':
         case 'MODE_USAGE_COUNT':
-          return this.handleModeUsage(records);
+          response = this.handleModeUsage(records);
+          break;
         case 'MODE_ERROR_RATE':
-          return this.handleModeErrorRate(records, normalized);
+          response = this.handleModeErrorRate(records, normalized);
+          break;
         case 'ACTIVITY_TODAY':
-          return this.handleActivityToday(records);
+          response = this.handleActivityToday(records);
+          break;
         case 'ACTIVITY_YESTERDAY':
-          return this.handleActivityYesterday(records);
+          response = this.handleActivityYesterday(records);
+          break;
         case 'ACTIVITY_RECENT':
-          return this.handleActivityRecent(records);
+          response = this.handleActivityRecent(records);
+          break;
         case 'BUSIEST_HOURS':
-          return this.handleBusiestHours(records);
+          response = this.handleBusiestHours(records);
+          break;
         case 'COMPARE_DAYS':
-          return this.handleCompareDays(records);
+          response = this.handleCompareDays(records);
+          break;
         case 'COMPARE_WEEKS':
-          return this.handleCompareWeeks(records);
+          response = this.handleCompareWeeks(records);
+          break;
         case 'ACTIVITY_PERIOD_WEEK':
-          return this.handlePeriodWeek(records);
+          response = this.handlePeriodWeek(records);
+          break;
         case 'ACTIVITY_PERIOD_MONTH':
-          return this.handlePeriodMonth(records);
+          response = this.handlePeriodMonth(records);
+          break;
         case 'HARDWARE_ESP32':
-          return this.handleHardwareEsp32(esp32);
+          response = this.handleHardwareEsp32(esp32);
+          break;
         case 'CAMERA_STATUS':
-          return this.handleCameraStatus(camera);
+          response = this.handleCameraStatus(camera);
+          break;
         case 'SYSTEM_STATUS':
-          return this.handleSystemStatus(records, esp32, camera);
+          response = this.handleSystemStatus(records, esp32, camera);
+          break;
         case 'GENERAL_SUMMARY':
-          return this.handleGeneralSummary(records, esp32);
+          response = this.handleGeneralSummary(records, esp32);
+          break;
         case 'ISSUE_HIGHLIGHTS':
-          return this.handleIssueHighlights(records, esp32);
+          response = this.handleIssueHighlights(records, esp32);
+          break;
         default:
-          return this.handleFallback(rawQuery);
+          response = this.handleFallback(rawQuery);
+          break;
       }
+
+      // Update percakapan konteks
+      if (response) {
+        this.context.lastIntent = response.intent;
+        this.context.lastQuery = rawQuery;
+        if (normalized.includes('arm')) this.context.lastMode = 'Arm';
+        else if (normalized.includes('servo')) this.context.lastMode = 'Servo';
+      }
+
+      return response;
     }
 
     // --- Intent Handlers ---
@@ -1010,18 +1230,151 @@
       };
     }
 
+    handleErrorHistory(records, options = {}) {
+      if (!records || records.length === 0) {
+        return {
+          intent: 'ERROR_HISTORY',
+          answer: '✅ **Tidak Ada Riwayat Error:** Seluruh rekaman sortir yang tercatat pada basis data berstatus berhasil tanpa kegagalan.',
+          basis: 'Basis Perhitungan: Dihitung dari 0 data error pada basis data.',
+          suggestions: ['Total sortir produk', 'Mode mana lebih efektif?', 'Status ESP32']
+        };
+      }
+
+      const errorRecords = records.filter(r => r.isError);
+      if (errorRecords.length === 0) {
+        return {
+          intent: 'ERROR_HISTORY',
+          answer: '✅ **Tidak Ada Riwayat Error:** Seluruh rekaman sortir yang tercatat pada basis data berstatus berhasil tanpa kegagalan.',
+          basis: `Basis Perhitungan: Dihitung dari 0 error di antara total ${records.length} rekaman sortir.`,
+          suggestions: ['Total sortir produk', 'Mode mana lebih efektif?', 'Status ESP32']
+        };
+      }
+
+      // Urutkan dari yang terbaru ke terlama (descending by timestamp)
+      const sortedErrors = [...errorRecords].sort((a, b) => b.timestamp - a.timestamp);
+      const limit = options.limit || 10;
+      const displayErrors = sortedErrors.slice(0, limit);
+
+      const items = displayErrors.map((e, idx) => {
+        const timeStr = formatWIB(e.timestamp);
+        const code = e.errorCode || 'ERR_GENERIC_TIMEOUT';
+        const runIdStr = e.runId ? ` | ID: \`${e.runId}\`` : '';
+        return `${idx + 1}. **[${timeStr}]**\n   • Mode: **${e.mode}** | Warna: **${e.color}** | Status: **${e.status}**\n   • Kode Error: \`${code}\`${runIdStr}`;
+      }).join('\n\n');
+
+      const paginationNote = errorRecords.length > limit
+        ? `\n\n> ℹ️ **Catatan Paginasi:** Menampilkan **${limit} error terbaru** dari total **${errorRecords.length} kejadian error** yang tercatat pada basis data.`
+        : `\n\n> ℹ️ Menampilkan seluruh **${errorRecords.length} kejadian error** yang tercatat pada basis data (diurutkan dari yang terbaru).`;
+
+      const answer = [
+        `📋 **Riwayat Seluruh Kejadian Error Sortir (WIB / Asia Jakarta):**`,
+        ``,
+        items,
+        paginationNote
+      ].join('\n');
+
+      return {
+        intent: 'ERROR_HISTORY',
+        answer,
+        basis: `Basis Perhitungan: Dihitung dari ${errorRecords.length} rekaman error yang valid dari total ${records.length} percobaan sortir.`,
+        suggestions: ['Kapan error terakhir?', 'Mode mana lebih efektif?', 'Berapa error akibat mode arm?']
+      };
+    }
+
+    handleCompareModeEffectiveness(records) {
+      if (!records || records.length === 0) {
+        return {
+          intent: 'COMPARE_MODE_EFFECTIVENESS',
+          answer: 'Data tidak tersedia — basis data belum memuat riwayat sortir untuk membandingkan efektivitas mode.',
+          basis: 'Basis Perhitungan: 0 data pada sistem.',
+          suggestions: ['Status ESP32', 'Total sortir produk']
+        };
+      }
+
+      const stats = computeStats(records);
+      const servoAttempts = stats.modes.Servo || 0;
+      const armAttempts = stats.modes.Arm || 0;
+      const servoSuccess = servoAttempts - (stats.modeErrors.Servo || 0);
+      const armSuccess = armAttempts - (stats.modeErrors.Arm || 0);
+      const servoFail = stats.modeErrors.Servo || 0;
+      const armFail = stats.modeErrors.Arm || 0;
+
+      const servoErrRateStr = stats.servoErrorRate !== null ? `${stats.servoErrorRate}%` : 'Belum dapat dihitung — tidak ada data percobaan (N/A)';
+      const armErrRateStr = stats.armErrorRate !== null ? `${stats.armErrorRate}%` : 'Belum dapat dihitung — tidak ada data percobaan (N/A)';
+
+      const servoSuccRateStr = servoAttempts > 0 ? `${Math.round((servoSuccess / servoAttempts) * 1000) / 10}%` : 'Belum dapat dihitung (N/A)';
+      const armSuccRateStr = armAttempts > 0 ? `${Math.round((armSuccess / armAttempts) * 1000) / 10}%` : 'Belum dapat dihitung (N/A)';
+
+      const servoDurationStr = stats.avgDurationServo ? `${stats.avgDurationServo} ms` : 'Data durasi belum tersedia pada log';
+      const armDurationStr = stats.avgDurationArm ? `${stats.avgDurationArm} ms` : 'Data durasi belum tersedia pada log';
+
+      let throughputStr = 'Data rentang waktu belum mencukupi untuk menghitung throughput';
+      if (stats.minTimestamp && stats.maxTimestamp && stats.maxTimestamp > stats.minTimestamp) {
+        const spanMinutes = (stats.maxTimestamp - stats.minTimestamp) / 60000;
+        if (spanMinutes >= 0.5) {
+          const ratePerMin = Math.round((stats.total / spanMinutes) * 10) / 10;
+          throughputStr = `~${ratePerMin} item/menit (seluruh lini)`;
+        }
+      }
+
+      const servoMissorts = stats.missortsByMode ? (stats.missortsByMode.Servo || 0) : 0;
+      const armMissorts = stats.missortsByMode ? (stats.missortsByMode.Arm || 0) : 0;
+
+      let conclusion = '';
+      if (servoAttempts === 0 && armAttempts === 0) {
+        conclusion = '> ⚠️ **Catatan Evaluasi:** Belum cukup data untuk membandingkan efektivitas kedua mode secara komprehensif (belum ada percobaan pada kedua mode).';
+      } else if (servoAttempts === 0) {
+        conclusion = `> ⚠️ **Catatan Evaluasi:** Belum cukup data untuk membandingkan efektivitas kedua mode secara komprehensif (Mode Servo belum memiliki data percobaan, sehingga tidak dapat disimpulkan bebas error).`;
+      } else if (armAttempts === 0) {
+        conclusion = `> ⚠️ **Catatan Evaluasi:** Belum cukup data untuk membandingkan efektivitas kedua mode secara komprehensif (Mode Arm belum memiliki data percobaan, sehingga tidak dapat disimpulkan bebas error).`;
+      } else {
+        if (stats.servoErrorRate < stats.armErrorRate) {
+          conclusion = `> 💡 **Kesimpulan Komparasi:** Berdasarkan data historis, **Mode Servo** mencatat tingkat keberhasilan lebih tinggi (${servoSuccRateStr} vs ${armSuccRateStr}) dan error rate lebih rendah (${servoErrRateStr} vs ${armErrRateStr}).\n> *Catatan: Korelasi dalam log ini belum membuktikan kelemahan mekanis Arm, namun dapat dipengaruhi oleh timeout transmisi atau durasi siklus gerak.*`;
+        } else if (stats.armErrorRate < stats.servoErrorRate) {
+          conclusion = `> 💡 **Kesimpulan Komparasi:** Berdasarkan data historis, **Mode Arm** mencatat tingkat keberhasilan lebih tinggi (${armSuccRateStr} vs ${servoSuccRateStr}) dan error rate lebih rendah (${armErrRateStr} vs ${servoErrRateStr}).`;
+        } else {
+          conclusion = `> 💡 **Kesimpulan Komparasi:** Kedua mode mencatat tingkat error yang seimbang (${servoErrRateStr}).`;
+        }
+      }
+
+      const answer = [
+        `🤖 **Perbandingan Efektivitas Mode Operasi (Servo vs Arm):**`,
+        ``,
+        `| Metrik Evaluasi | Mode Servo | Mode Arm (Lengan Robot) |`,
+        `| :--- | :--- | :--- |`,
+        `| **Total Percobaan (Attempts)** | ${servoAttempts} item | ${armAttempts} item |`,
+        `| **Jumlah Berhasil** | ${servoSuccess} item | ${armSuccess} item |`,
+        `| **Jumlah Gagal / Timeout** | ${servoFail} item | ${armFail} item |`,
+        `| **Tingkat Keberhasilan (Success Rate)** | ${servoSuccRateStr} | ${armSuccRateStr} |`,
+        `| **Tingkat Kegagalan (Error Rate)** | ${servoErrRateStr} | ${armErrRateStr} |`,
+        `| **Rata-rata Durasi Siklus** | ${servoDurationStr} | ${armDurationStr} |`,
+        `| **Salah Sortir (Missort)** | ${servoMissorts} kejadian | ${armMissorts} kejadian |`,
+        `| **Throughput Estimasi** | ${throughputStr} | ${throughputStr} |`,
+        ``,
+        conclusion
+      ].join('\n');
+
+      return {
+        intent: 'COMPARE_MODE_EFFECTIVENESS',
+        answer,
+        basis: `Basis Perhitungan: Dihitung dari ${stats.total} total percobaan sortir (${servoAttempts} Servo, ${armAttempts} Arm) pada basis data riil.`,
+        suggestions: ['Berapa error akibat mode arm?', 'Kapan saja error terjadi?', 'Status ESP32']
+      };
+    }
+
     handleErrorToday(records) {
       const todayBounds = getDayBoundsWIB();
       const todayRecords = records.filter(r => r.timestamp >= todayBounds.startEpoch && r.timestamp <= todayBounds.endEpoch);
       const todayErrors = todayRecords.filter(r => r.isError);
 
       const stats = computeStats(todayRecords);
+      const rateStr = stats.errorRate !== null ? `${stats.errorRate}%` : 'Belum dapat dihitung (N/A)';
 
       const answer = [
         `⚠️ **Laporan Error Hari Ini (${todayBounds.label} WIB):**`,
         `• **Jumlah Error:** **${todayErrors.length}** kejadian`,
         `• **Total Percobaan Hari Ini:** ${todayRecords.length} item`,
-        `• **Error Rate Hari Ini:** **${stats.errorRate}%**`,
+        `• **Error Rate Hari Ini:** **${rateStr}**`,
         todayErrors.length > 0 ? `• **Error Terakhir Hari Ini:** ${formatWIB(todayErrors[todayErrors.length - 1].timestamp, 'time')}` : '• Tidak ada error pada hari ini.',
         ``,
         `📊 **Distribusi Error per Mode:** Servo: ${stats.modeErrors.Servo} | Arm: ${stats.modeErrors.Arm}`
@@ -1046,15 +1399,19 @@
       }
 
       const stats = computeStats(records);
+      const rateStr = stats.errorRate !== null ? `${stats.errorRate}%` : 'Belum dapat dihitung (N/A)';
+      const servoRateStr = stats.servoErrorRate !== null ? `${stats.servoErrorRate}%` : 'Belum dapat dihitung — tidak ada data percobaan (N/A)';
+      const armRateStr = stats.armErrorRate !== null ? `${stats.armErrorRate}%` : 'Belum dapat dihitung — tidak ada data percobaan (N/A)';
+
       const answer = [
         `📈 **Error Rate (Tingkat Kegagalan) Sistem:**`,
-        `• **Error Rate Keseluruhan:** **${stats.errorRate}%**`,
+        `• **Error Rate Keseluruhan:** **${rateStr}**`,
         `• **Total Percobaan:** ${stats.total} item`,
         `• **Sukses:** ${stats.successCount} item | **Gagal:** ${stats.errorCount} item`,
         ``,
         `🔬 **Error Rate per Mode:**`,
-        `• Mode Servo: **${stats.servoErrorRate}%** (${stats.modeErrors.Servo} error dari ${stats.modes.Servo} percobaan)`,
-        `• Mode Arm: **${stats.armErrorRate}%** (${stats.modeErrors.Arm} error dari ${stats.modes.Arm} percobaan)`,
+        `• Mode Servo: **${servoRateStr}** (${stats.modeErrors.Servo} error dari ${stats.modes.Servo} percobaan)`,
+        `• Mode Arm: **${armRateStr}** (${stats.modeErrors.Arm} error dari ${stats.modes.Arm} percobaan)`,
         ``,
         `> Formula: \`Error Rate = (Jumlah Error / Total Percobaan) × 100%\``
       ].join('\n');
@@ -1086,11 +1443,14 @@
       if (servoErr > armErr) dominantMode = 'Mode Servo';
       else if (armErr > servoErr) dominantMode = 'Mode Arm';
 
+      const servoRateStr = stats.servoErrorRate !== null ? `${stats.servoErrorRate}%` : 'Belum dapat dihitung (N/A)';
+      const armRateStr = stats.armErrorRate !== null ? `${stats.armErrorRate}%` : 'Belum dapat dihitung (N/A)';
+
       const answer = [
         `🤖 **Analisis Error Berdasarkan Mode Operasi:**`,
         `• Mode dengan error terbanyak: **${dominantMode}**`,
-        `• **Mode Servo:** ${servoErr} error (${stats.servoErrorRate}% error rate dari ${stats.modes.Servo} percobaan)`,
-        `• **Mode Arm:** ${armErr} error (${stats.armErrorRate}% error rate dari ${stats.modes.Arm} percobaan)`,
+        `• **Mode Servo:** ${servoErr} error (${servoRateStr} error rate dari ${stats.modes.Servo} percobaan)`,
+        `• **Mode Arm:** ${armErr} error (${armRateStr} error rate dari ${stats.modes.Arm} percobaan)`,
         ``,
         `⚠️ **Catatan Teknis Korelasi vs Kausalitas:**`,
         `Data di atas menunjukkan korelasi frekuensi kegagalan pada mode kerja yang tercatat dalam log, **namun belum membuktikan bahwa mekanisme mekanis ${dominantMode} adalah penyebab kerusakan fisik**. Kegagalan dapat dipengaruhi oleh timeout transmisi Wi-Fi, waktu tunggu perintah, atau durasi gerak lengan robot.`
@@ -1234,24 +1594,24 @@
         `• **Mode Arm (Lengan Robot):** ${stats.modes.Arm} kali pemrosesan (${stats.total > 0 ? Math.round((stats.modes.Arm / stats.total) * 100) : 0}%)`,
         ``,
         `⚙️ **Tingkat Keberhasilan:**`,
-        `• Servo: ${stats.modes.Servo - stats.modeErrors.Servo} sukses (${100 - stats.servoErrorRate}%)`,
-        `• Arm: ${stats.modes.Arm - stats.modeErrors.Arm} sukses (${100 - stats.armErrorRate}%)`
+        `• Servo: ${stats.modes.Servo - stats.modeErrors.Servo} sukses (${stats.servoErrorRate !== null ? `${100 - stats.servoErrorRate}%` : 'N/A'})`,
+        `• Arm: ${stats.modes.Arm - stats.modeErrors.Arm} sukses (${stats.armErrorRate !== null ? `${100 - stats.armErrorRate}%` : 'N/A'})`
       ].join('\n');
 
       return {
         intent: 'MODE_USAGE_COUNT',
         answer,
         basis: `Basis Perhitungan: Dihitung dari total ${stats.total} data pemrosesan mode pada sistem.`,
-        suggestions: ['Error rate mode arm', 'Error rate mode servo', 'Bandingkan error mode']
+        suggestions: ['Error rate mode arm', 'Error rate mode servo', 'Bandingkan efektivitas mode']
       };
     }
 
     handleModeErrorRate(records, query) {
-      if (records.length === 0) {
+      if (!records || records.length === 0) {
         return {
           intent: 'MODE_ERROR_RATE',
           answer: 'Belum ada data rekaman untuk menghitung error rate mode.',
-          basis: 'Basis Perhitungan: 0 data.',
+          basis: 'Basis Perhitungan: 0 data pada sistem.',
           suggestions: ['Status ESP32', 'Total sortir']
         };
       }
@@ -1261,34 +1621,61 @@
       const isServo = query.includes('servo');
 
       if (isArm && !isServo) {
+        const attempts = stats.modes.Arm || 0;
+        const errs = stats.modeErrors.Arm || 0;
+        const succ = attempts - errs;
+        const rateStr = stats.armErrorRate !== null ? `${stats.armErrorRate}%` : 'Belum dapat dihitung — tidak ada data percobaan (N/A)';
+
+        let note = '';
+        if (attempts === 0) {
+          note = '\n\n> ⚠️ Mode Arm belum memiliki percobaan tercatat, sehingga tingkat kegagalan tidak dapat disimpulkan bebas error.';
+        } else {
+          note = '\n\n> **Catatan Teknis:** Data ini merefleksikan riwayat sortir pada basis data. Korelasi kegagalan belum tentu membuktikan kerusakan mekanis pada lengan robot.';
+        }
+
         return {
           intent: 'MODE_ERROR_RATE',
-          answer: `🤖 **Error Rate Mode Arm:** **${stats.armErrorRate}%**\n• Rincian: ${stats.modeErrors.Arm} kegagalan dari ${stats.modes.Arm} kali percobaan mode Arm.\n• Sukses: ${stats.modes.Arm - stats.modeErrors.Arm} item.`,
-          basis: `Basis Perhitungan: Dihitung dari ${stats.modes.Arm} percobaan mode Arm.`,
-          suggestions: ['Error rate mode servo', 'Bandingkan error mode', 'Total sortir']
+          answer: `🤖 **Analisis Error Mode Arm:**\n• **Tingkat Error (Error Rate):** **${rateStr}**\n• **Jumlah Error:** **${errs}** kegagalan dari **${attempts}** kali percobaan mode Arm\n• **Berhasil:** ${succ} item${note}`,
+          basis: `Basis Perhitungan: Dihitung dari ${attempts} percobaan mode Arm (${succ} sukses, ${errs} gagal).`,
+          suggestions: ['Error rate mode servo', 'Bandingkan efektivitas mode', 'Total sortir']
         };
       }
 
       if (isServo && !isArm) {
+        const attempts = stats.modes.Servo || 0;
+        const errs = stats.modeErrors.Servo || 0;
+        const succ = attempts - errs;
+        const rateStr = stats.servoErrorRate !== null ? `${stats.servoErrorRate}%` : 'Belum dapat dihitung — tidak ada data percobaan (N/A)';
+
+        let note = '';
+        if (attempts === 0) {
+          note = '\n\n> ⚠️ Mode Servo belum memiliki percobaan tercatat, sehingga tingkat kegagalan tidak dapat disimpulkan bebas error.';
+        } else {
+          note = '\n\n> **Catatan Teknis:** Data ini merefleksikan riwayat sortir pada basis data aktuator servo.';
+        }
+
         return {
           intent: 'MODE_ERROR_RATE',
-          answer: `🦾 **Error Rate Mode Servo:** **${stats.servoErrorRate}%**\n• Rincian: ${stats.modeErrors.Servo} kegagalan dari ${stats.modes.Servo} kali percobaan mode Servo.\n• Sukses: ${stats.modes.Servo - stats.modeErrors.Servo} item.`,
-          basis: `Basis Perhitungan: Dihitung dari ${stats.modes.Servo} percobaan mode Servo.`,
-          suggestions: ['Error rate mode arm', 'Bandingkan error mode', 'Total sortir']
+          answer: `🦾 **Analisis Error Mode Servo:**\n• **Tingkat Error (Error Rate):** **${rateStr}**\n• **Jumlah Error:** **${errs}** kegagalan dari **${attempts}** kali percobaan mode Servo\n• **Berhasil:** ${succ} item${note}`,
+          basis: `Basis Perhitungan: Dihitung dari ${attempts} percobaan mode Servo (${succ} sukses, ${errs} gagal).`,
+          suggestions: ['Error rate mode arm', 'Bandingkan efektivitas mode', 'Total sortir']
         };
       }
 
+      const servoRateStr = stats.servoErrorRate !== null ? `${stats.servoErrorRate}%` : 'Belum dapat dihitung (N/A)';
+      const armRateStr = stats.armErrorRate !== null ? `${stats.armErrorRate}%` : 'Belum dapat dihitung (N/A)';
+
       const answer = [
         `🤖 **Perbandingan Error Rate Kedua Mode:**`,
-        `• **Mode Servo:** **${stats.servoErrorRate}%** (${stats.modeErrors.Servo} error / ${stats.modes.Servo} total)`,
-        `• **Mode Arm:** **${stats.armErrorRate}%** (${stats.modeErrors.Arm} error / ${stats.modes.Arm} total)`
+        `• **Mode Servo:** **${servoRateStr}** (${stats.modeErrors.Servo} error dari ${stats.modes.Servo} total percobaan)`,
+        `• **Mode Arm:** **${armRateStr}** (${stats.modeErrors.Arm} error dari ${stats.modes.Arm} total percobaan)`
       ].join('\n');
 
       return {
         intent: 'MODE_ERROR_RATE',
         answer,
-        basis: `Basis Perhitungan: Dihitung dari total ${stats.total} rekaman sortir.`,
-        suggestions: ['Mode apa sering error?', 'Error rate keseluruhan', 'Total sortir']
+        basis: `Basis Perhitungan: Dihitung dari total ${stats.total} rekaman sortir (${stats.modes.Servo} Servo, ${stats.modes.Arm} Arm).`,
+        suggestions: ['Mode apa sering error?', 'Bandingkan efektivitas mode', 'Total sortir']
       };
     }
 
@@ -1679,10 +2066,14 @@
       extractAllRecords,
       getDayBoundsWIB,
       formatWIB,
-      toWIBDate
+      toWIBDate,
+      isAnalyticQuery,
+      isRobotControlCommand
     };
   } else {
     global.SmartDataAssistant = SmartDataAssistant;
     global.smartDataAssistant = new SmartDataAssistant();
+    global.isAnalyticQuery = isAnalyticQuery;
+    global.isRobotControlCommand = isRobotControlCommand;
   }
 })(typeof window !== 'undefined' ? window : globalThis);

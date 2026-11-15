@@ -3856,38 +3856,49 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     try {
       if (await handleResetConfirm(raw)) return;
 
-      const t = ' ' + raw.toLowerCase().trim() + ' ';
-      const has = (...ws) => ws.some(w => t.includes(w));
+      const isAnalytic = (typeof window.isAnalyticQuery === 'function')
+        ? window.isAnalyticQuery(raw)
+        : (/(\?|analis|banding|efektif|berapa|kapan|mengapa|kenapa|apakah|bagaimana|paling|daftar|list|riwayat|histori|rate|status|kondisi)/i.test(raw));
 
-      // 1. Eksekusi Perintah Aksi Kontrol Hardware & Navigasi
-      if (/ubah\s*(ke\s*)?mode\s*arm|ganti\s*(ke\s*)?mode\s*arm|ke\s*mode\s*arm|switch\s*to\s*arm/i.test(t)) {
-        window.changeSortingMode('Arm');
-        jarvisSay(JL('Mode operasional berhasil diubah ke Mode Arm.', 'Operating mode changed to Arm mode.'), true, 'Sistem');
-        renderJarvisChips(['Mode Servo', 'Error rate mode arm', 'Status ESP32']);
-        return;
-      }
-      if (/ubah\s*(ke\s*)?mode\s*servo|ganti\s*(ke\s*)?mode\s*servo|ke\s*mode\s*servo|switch\s*to\s*servo/i.test(t)) {
-        window.changeSortingMode('Servo');
-        jarvisSay(JL('Mode operasional berhasil diubah ke Mode Servo.', 'Operating mode changed to Servo mode.'), true, 'Sistem');
-        renderJarvisChips(['Mode Arm', 'Error rate mode servo', 'Status ESP32']);
-        return;
-      }
-      if (/^(jeda|pause|berhenti sementara|tunda)\b/i.test(t.trim())) {
-        if (state.aiReady && !state.isPaused) window.togglePause();
-        jarvisSay(JL('Sistem AI Vision dijeda sementara.', 'AI Vision system paused.'), true, 'Sistem');
-        return;
-      }
-      if (/^(lanjut|resume|jalankan lagi|mulai lagi)\b/i.test(t.trim())) {
-        if (state.aiReady && state.isPaused) window.togglePause();
-        jarvisSay(JL('Sistem AI Vision dilanjutkan kembali.', 'AI Vision system resumed.'), true, 'Sistem');
-        return;
-      }
-      if (/export\s*(laporan\s*)?(pdf|excel|xlsx|csv)/i.test(t)) {
-        const m = t.match(/pdf|excel|xlsx|csv/i);
-        const fmt = m ? (m[0].toLowerCase() === 'excel' ? 'xlsx' : m[0].toLowerCase()) : 'pdf';
-        window.doExport(fmt);
-        jarvisSay(JL(`Laporan format ${fmt.toUpperCase()} berhasil diekspor.`, `Report exported in ${fmt.toUpperCase()} format.`), true, 'Sistem');
-        return;
+      // 1. Eksekusi Perintah Aksi Kontrol Hardware & Navigasi (HANYA jika BUKAN kueri analitis)
+      if (!isAnalytic) {
+        const isArmCmd = (typeof window.isRobotControlCommand === 'function')
+          ? (window.isRobotControlCommand(raw) && /arm/i.test(raw))
+          : (/^\s*(tolong\s*)?(ubah|ganti|set|switch|pindah)\s+(mode\s+(kerja\s+)?(ke\s+)?|ke\s+mode\s+)arm\s*$/i.test(raw.trim()));
+
+        const isServoCmd = (typeof window.isRobotControlCommand === 'function')
+          ? (window.isRobotControlCommand(raw) && /servo/i.test(raw))
+          : (/^\s*(tolong\s*)?(ubah|ganti|set|switch|pindah)\s+(mode\s+(kerja\s+)?(ke\s+)?|ke\s+mode\s+)servo\s*$/i.test(raw.trim()));
+
+        if (isArmCmd) {
+          window.changeSortingMode('Arm');
+          jarvisSay(JL('Mode operasional berhasil diubah ke Mode Arm.', 'Operating mode changed to Arm mode.'), true, 'Sistem');
+          renderJarvisChips(['Mode Servo', 'Error rate mode arm', 'Status ESP32']);
+          return;
+        }
+        if (isServoCmd) {
+          window.changeSortingMode('Servo');
+          jarvisSay(JL('Mode operasional berhasil diubah ke Mode Servo.', 'Operating mode changed to Servo mode.'), true, 'Sistem');
+          renderJarvisChips(['Mode Arm', 'Error rate mode servo', 'Status ESP32']);
+          return;
+        }
+        if (/^(jeda|pause|berhenti sementara|tunda)\s*$/i.test(raw.trim())) {
+          if (state.aiReady && !state.isPaused) window.togglePause();
+          jarvisSay(JL('Sistem AI Vision dijeda sementara.', 'AI Vision system paused.'), true, 'Sistem');
+          return;
+        }
+        if (/^(lanjut|resume|jalankan lagi|mulai lagi)\s*$/i.test(raw.trim())) {
+          if (state.aiReady && state.isPaused) window.togglePause();
+          jarvisSay(JL('Sistem AI Vision dilanjutkan kembali.', 'AI Vision system resumed.'), true, 'Sistem');
+          return;
+        }
+        if (/^\s*(export|ekspor)\s*(laporan\s*)?(pdf|excel|xlsx|csv)\s*$/i.test(raw.trim())) {
+          const m = raw.match(/pdf|excel|xlsx|csv/i);
+          const fmt = m ? (m[0].toLowerCase() === 'excel' ? 'xlsx' : m[0].toLowerCase()) : 'pdf';
+          window.doExport(fmt);
+          jarvisSay(JL(`Laporan format ${fmt.toUpperCase()} berhasil diekspor.`, `Report exported in ${fmt.toUpperCase()} format.`), true, 'Sistem');
+          return;
+        }
       }
 
       // 2. Evaluasi Mesin Analisis Data Pintar (Zero-LLM Smart Data Assistant)
@@ -4038,12 +4049,25 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       const m = $('mode-selector').value;
       jarvisSay(JL(`Mode sortir saat ini: ${m}.`, `Current sorting mode: ${m}.`)); return true;
     }
-    if (has('arm') && has('ubah', 'ganti', 'change', 'pindah', 'mode', 'set')) {
+    const isAnalyticLocal = (typeof window.isAnalyticQuery === 'function')
+      ? window.isAnalyticQuery(raw)
+      : (/(\?|analis|banding|efektif|berapa|kapan|mengapa|kenapa|apakah|bagaimana|paling|daftar|list|riwayat|histori|rate|status|kondisi)/i.test(raw));
+
+    // Ambiguous mode query check
+    if (/^\s*(mode\s+)?(arm|servo)\s*$/i.test(raw.trim())) {
+      const target = raw.toLowerCase().includes('arm') ? 'Arm' : 'Servo';
+      jarvisSay(JL(`Klarifikasi: Apakah Anda ingin mengubah mode fisik robot ke ${target}, atau melihat analisis performa Mode ${target}?`,
+        `Clarification: Do you want to switch physical mode to ${target}, or view performance analysis for Mode ${target}?`));
+      renderJarvisChips([`Ganti mode ke ${target}`, `Analisis mode ${target}`]);
+      return true;
+    }
+
+    if (!isAnalyticLocal && /^\s*(tolong\s*)?(ubah|ganti|change|pindah|set|switch)\s+(ke\s+)?(mode\s+)?arm\s*$/i.test(raw.trim())) {
       try { $('mode-selector').value = 'Arm'; } catch (e) {}
       window.changeSortingMode('Arm');
       jarvisSay(JL('Mode diubah ke Arm.', 'Mode changed to Arm.')); return true;
     }
-    if (has('servo') && has('ubah', 'ganti', 'change', 'pindah', 'mode', 'set')) {
+    if (!isAnalyticLocal && /^\s*(tolong\s*)?(ubah|ganti|change|pindah|set|switch)\s+(ke\s+)?(mode\s+)?servo\s*$/i.test(raw.trim())) {
       try { $('mode-selector').value = 'Servo'; } catch (e) {}
       window.changeSortingMode('Servo');
       jarvisSay(JL('Mode diubah ke Servo.', 'Mode changed to Servo.')); return true;

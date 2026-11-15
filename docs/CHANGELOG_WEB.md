@@ -3,6 +3,30 @@ Semua perubahan penting pada kode program website dan perangkat lunak proyek **V
 
 Format mengikuti prinsip [Keep a Changelog](https://keepachangelog.com/id/1.0.0/) dan menganut [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.1] - 2026-11-15
+
+### Diperbaiki (Fixed)
+- **Pemisahan Ketat Kueri Analitik vs Kontrol Robot (Bug 1):**
+  - Implementasi fungsi `isAnalyticQuery()` dan `isRobotControlCommand()` untuk memastikan kueri analitis (seperti *"Analisa mode Arm dan Servo mana lebih efektif?"*) tidak pernah memicu perubahan mode kerja fisik robot (`changeSortingMode`).
+  - Regex kontrol hardware di `window.jarvisSend` dan `processCommand` di `index.html` diperketat dengan mewajibkan kata kerja perintah eksplisit (`ubah`, `ganti`, `set`, `switch`, `pindah`). Kata `'mode'` dihapus dari daftar kata aksi pemicu di fallback command.
+  - Penanganan kueri ambigu (`"mode arm"`, `"servo"`): sistem menahan aksi fisik dan meminta klarifikasi intent (`AMBIGUOUS_CLARIFICATION`).
+- **Riwayat Lengkap Kejadian Error (Bug 2):**
+  - Pemisahan intent `ERROR_LATEST` (hanya 1 error terbaru) dan `ERROR_HISTORY` (seluruh kejadian error).
+  - Intent `ERROR_HISTORY` menyajikan daftar kejadian error secara kronologis menurun (terbaru ke terlama) dengan format waktu WIB, kode error, mode, warna, status, runId, dan catatan paginasi.
+- **Validasi Pembagi Nol & Penanganan Data Kosong/Null (Bug 3):**
+  - Mode dengan 0 percobaan kini menghasilkan error rate `null` yang dilaporkan sebagai `"Belum dapat dihitung — tidak ada data percobaan (N/A)"`, bukan 0% dan tidak disimpulkan bebas error.
+  - Penanganan database null atau unreachable: menghasilkan pesan transparan `"Data tidak tersedia"` tanpa memalsukan angka 0.
+- **Komparasi Efektivitas Multi-Metrik (Bug 4):**
+  - Implementasi intent `COMPARE_MODE_EFFECTIVENESS` yang mengevaluasi Servo vs Arm melalui tabel komparasi 8 metrik riil: Total Percobaan, Jumlah Berhasil, Jumlah Gagal, Success Rate, Error Rate, Rata-rata Durasi Siklus (`durationMs`), Salah Sortir (Missort), dan Throughput.
+  - Pernyataan eksplisit jika salah satu mode belum memiliki data percobaan yang memadai.
+- **Konsistensi Basis Perhitungan (Bug 5):**
+  - Standarisasi pelaporan basis perhitungan pada seluruh respons analitik (Total percobaan sortir = sukses + gagal).
+- **Konteks Percakapan Multi-Turn / Follow-Up (Bug 6):**
+  - Pelacakan `conversationContext` pada `SmartDataAssistant` sehingga pertanyaan lanjutan singkat (seperti *"Bagaimana dengan Arm?"*, *"Bandingkan keduanya"*, *"Bagaimana kemarin?"*) diproses sesuai topik analitik sebelumnya tanpa salah memicu kontrol hardware.
+- **Uji Regresi Otomatis (Bug 7):**
+  - Penambahan 11 skenario pengujian regresi di `tests/smart_data_assistant.test.js`.
+  - Total test suite proyek meningkat menjadi 53 test case (100% Passing).
+
 ---
 
 ## [2.3.0] - 2026-11-15

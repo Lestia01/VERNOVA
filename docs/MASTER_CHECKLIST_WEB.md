@@ -209,3 +209,46 @@
   - **Solusi:** Menyusun dokumen arsitektur dan spesifikasi menyeluruh di `docs/SMART_DATA_ASSISTANT.md`.
   - **File:** `docs/SMART_DATA_ASSISTANT.md`.
 
+---
+
+## 7. P1 — BUGFIX LOGIKA SMART DATA ASSISTANT (V2.3.1)
+
+- [x] **BUG-001 (P1)**: Pemisahan Ketat Kueri Analitik vs Kontrol Hardware Robot
+  - **Masalah:** Pertanyaan analisis seperti *"Analisa mode Arm dan Servo mana lebih efektif?"* memicu pergantian mode ke Arm (`Mode diubah ke Arm`).
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Implementasi `isAnalyticQuery()` dan `isRobotControlCommand()`. Kueri analitis strictly read-only dan diblokir dari aksi fisik. Pemicu kontrol diperketat menjadi kata kerja imperatif saja (`ubah`, `ganti`, `set`, `switch`, `pindah`). Pertanyaan ambigu (`"mode arm"`) meminta klarifikasi (`AMBIGUOUS_CLARIFICATION`).
+  - **File:** `assets/js/smart-data-assistant.js`, `index.html`.
+
+- [x] **BUG-002 (P1)**: Riwayat Lengkap Kejadian Error (`ERROR_HISTORY`)
+  - **Masalah:** Pertanyaan *"kapan saja errornya terjadi"* hanya menampilkan 1 error terakhir.
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Pemisahan intent `ERROR_LATEST` (1 error terbaru) vs `ERROR_HISTORY` (seluruh kejadian error terurut kronologis menurun, dilengkapi waktu WIB, mode, warna, kode error, status, runId, dan catatan paginasi).
+  - **File:** `assets/js/smart-data-assistant.js`.
+
+- [x] **BUG-003 (P1)**: Validasi Pembagi Nol & Penanganan Transparan Data Kosong/Null
+  - **Masalah:** Mode dengan 0 percobaan dilaporkan 0% error rate dan disimpulkan bebas error.
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Jika percobaan = 0, error rate bernilai `null` dan dilaporkan *"Belum dapat dihitung — tidak ada data percobaan (N/A)"*. Jika database null/unreachable, dilaporkan transparan *"Data tidak tersedia"* tanpa memalsukan angka 0.
+  - **File:** `assets/js/smart-data-assistant.js`.
+
+- [x] **BUG-004 (P1)**: Komparasi Efektivitas Multi-Metrik (`COMPARE_MODE_EFFECTIVENESS`)
+  - **Masalah:** Perbandingan efektivitas Servo vs Arm tidak komprehensif atau salah terpicu.
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Tabel komparasi 8 metrik riil: Total Percobaan, Jumlah Berhasil, Jumlah Gagal, Success Rate, Error Rate, Rata-rata Durasi Siklus (`durationMs`), Salah Sortir (Missort), dan Throughput. Menyatakan eksplisit jika mode belum memiliki data yang cukup.
+  - **File:** `assets/js/smart-data-assistant.js`.
+
+- [x] **BUG-005 (P1)**: Konsistensi Basis Perhitungan
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Seluruh jawaban analitis mencantumkan basis perhitungan terstandarisasi: Total percobaan sortir (attempts = success + fail).
+  - **File:** `assets/js/smart-data-assistant.js`.
+
+- [x] **BUG-006 (P1)**: Pelacakan Konteks Percakapan Multi-Turn (Follow-Up)
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Objek `conversationContext` (`lastIntent`, `lastMode`, `lastColor`, `lastTimeframe`, `lastQuery`) melacak giliran percakapan sehingga follow-up seperti *"Bagaimana dengan Arm?"* dievaluasi sebagai data analitik dan bukan perintah kontrol hardware.
+  - **File:** `assets/js/smart-data-assistant.js`.
+
+- [x] **BUG-007 (P1)**: Uji Regresi Otomatis 11 Skenario
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Hasil:** 53/53 pengujian unit lulus 100% (24 pengujian pada `smart_data_assistant.test.js`).
+  - **File:** `tests/smart_data_assistant.test.js`.
+

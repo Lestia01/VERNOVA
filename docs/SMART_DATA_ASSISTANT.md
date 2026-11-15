@@ -78,10 +78,12 @@
 ### Kategori B: Analisis Error dan Kegagalan
 | Intent ID | Pola Pertanyaan Contoh | Output Analitik |
 | :--- | :--- | :--- |
-| `ERROR_LATEST` | *"Kapan error terakhir terjadi?"*, *"Error terakhir"* | Waktu kejadian (format WIB), mode, warna, kode error (`ERR_WATCHDOG_12S`), dan status. |
+| `ERROR_HISTORY` | *"Kapan saja error terjadi?"*, *"Kapan saja errornya terjadi"*, *"Riwayat error"* | Daftar seluruh riwayat error terurut kronologis descending (WIB, kode error, mode, warna, status, runId) dengan catatan paginasi. |
+| `ERROR_LATEST` | *"Kapan error terakhir terjadi?"*, *"Error terakhir"* | Waktu kejadian (format WIB), mode, warna, kode error (`ERR_WATCHDOG_12S`), dan status (hanya 1 kejadian terbaru). |
 | `ERROR_LIST` | *"Tampilkan daftar error terbaru"*, *"Log error"* | Daftar 5 error terbaru (kronologis mundur) dengan timestamp WIB dan kode error. |
 | `ERROR_TODAY` | *"Berapa error terjadi hari ini?"*, *"Kegagalan hari ini"* | Jumlah error hari ini (00:00 - 23:59 WIB), error rate hari ini, dan distribusi mode. |
-| `ERROR_RATE` | *"Berapa error rate sistem?"*, *"Tingkat kegagalan"* | Persentase error keseluruhan dan rincian error rate mode Servo vs mode Arm. |
+| `ERROR_RATE` | *"Berapa error rate sistem?"*, *"Tingkat kegagalan"* | Persentase error keseluruhan dan rincian error rate mode Servo vs mode Arm (`N/A` jika 0 percobaan). |
+| `ERROR_BY_MODE` | *"Berapa error akibat mode Arm?"* | Hitungan error spesifik mode dan persentase kegagalan tanpa memicu kontrol hardware. |
 | `ERROR_MOST_BY_MODE` | *"Mode apa yang paling sering error?"* | Perbandingan error mode Servo vs Arm + Catatan disclaimer korelasi vs kausalitas. |
 | `ERROR_MODE_COMPARISON`| *"Bandingkan error mode servo vs arm"* | Metrik komparasi kegagalan antar mode kerja robot. |
 | `ERROR_BY_TYPE` | *"Jenis error apa yang sering muncul?"*, *"Kode error"* | Rincian breakdown per kode error (`ERR_WATCHDOG_12S`, `ERR_TIMEOUT`, dll). |
@@ -91,9 +93,10 @@
 ### Kategori C: Pola Operasional dan Mode Kerja
 | Intent ID | Pola Pertanyaan Contoh | Output Analitik |
 | :--- | :--- | :--- |
+| `COMPARE_MODE_EFFECTIVENESS` | *"Mode Arm dan Servo mana lebih efektif?"*, *"Analisa mode Arm dan Servo mana lebih efektif?"* | Komparasi komprehensif 8 metrik riil: Total Percobaan, Berhasil, Gagal, Success Rate, Error Rate, Durasi Siklus, Missort, dan Throughput. |
 | `MOST_USED_MODE` | *"Mode apa yang paling sering digunakan?"* | Identifikasi mode dominan (Servo vs Arm) beserta persentase penggunaan. |
 | `MODE_USAGE_COUNT` | *"Berapa kali mode servo dan arm digunakan?"* | Rincian frekuensi pemrosesan dan rasio sukses tiap mode. |
-| `MODE_ERROR_RATE` | *"Berapa error rate untuk mode arm?"* | Formula spesifik: `errorArm / totalArm * 100%`. |
+| `MODE_ERROR_RATE` | *"Berapa error rate untuk mode arm?"*, *"Analisis mode Arm"* | Formula spesifik: `errorArm / totalArm * 100%` (`N/A` jika 0 percobaan). |
 
 ### Kategori D: Analisis Waktu dan Tren (WIB)
 | Intent ID | Pola Pertanyaan Contoh | Output Analitik |
@@ -118,35 +121,24 @@
 | `GENERAL_SUMMARY` | *"Berikan ringkasan data saat ini"*, *"Rekap sistem"* | 5 poin ringkasan eksekutif produksi, aktivitas hari ini, warna, mode, dan integritas. |
 | `ISSUE_HIGHLIGHTS` | *"Apa masalah yang perlu diperhatikan operator?"* | Rekomendasi SOP terarah berdasarkan batas ambang metrik (error rate > 15%, ESP32 offline, dll). |
 
-### Out-of-Scope (Fallback Terarah)
-Jika pengguna menanyakan hal di luar topik operasional pabrik sortir (contoh: *"Siapakah presiden Indonesia?"*), asisten menjawab dengan ramah:
-1. Menegaskan identitas sebagai VERNOVA Smart Data Assistant.
-2. Memberikan daftar topik data yang didukung.
-3. Menyediakan tombol *suggestion chips* untuk membantu mengarahkan operator kembali ke data pabrik.
+### Penanganan Ambigu & Klarifikasi
+Jika operator memasukkan input ambigu seperti `"mode arm"` atau `"servo"` tanpa kata kerja imperatif maupun pertanyaan jelas, sistem memicu intent `AMBIGUOUS_CLARIFICATION` untuk meminta konfirmasi:
+> *"Apakah Anda ingin mengubah mode fisik robot ke Arm, atau menganalisis performa mode Arm?"*
+Sistem menahan seluruh aksi fisik sampai operator memberikan perintah eksplisit.
+
+### Konteks Percakapan Follow-Up
+Modul melacak `conversationContext` (`lastIntent`, `lastMode`, `lastColor`, `lastTimeframe`, `lastQuery`) sehingga kueri lanjutan multi-turn:
+- User: *"Berapa error rate mode Servo?"* -> Jawab error rate Servo.
+- User: *"Bagaimana dengan Arm?"* -> Otomatis dievaluasi sebagai analitik mode Arm, **BUKAN pergantian mode fisik**.
+- User: *"Bandingkan keduanya"* -> Memicu komparasi multi-metrik `COMPARE_MODE_EFFECTIVENESS`.
 
 ---
 
-## 4. Normalisasi Teks & Kamus Bahasa Indonesia
+## 4. Normalisasi Teks & Pemisahan Kontrol vs Analisis
 
-Modul `normalizeText()` membersihkan input teks operator:
-- Mengubah seluruh karakter ke huruf kecil (*lowercase*).
-- Menghapus tanda baca non-alfanumerik tanpa merusak angka dan spasi.
-- Mengganti singkatan (*slang*), istilah santai, dan typo umum bahasa Indonesia:
-
-```javascript
-const SLANG_MAP = {
-  'brp': 'berapa', 'brapa': 'berapa', 'berpa': 'berapa',
-  'tdk': 'tidak', 'tak': 'tidak', 'gak': 'tidak', 'ga': 'tidak', 'ngga': 'tidak', 'nggak': 'tidak',
-  'kmrn': 'kemarin', 'kemaren': 'kemarin', 'kmren': 'kemarin',
-  'hr': 'hari', 'hri': 'hari', 'wrna': 'warna',
-  'knp': 'kenapa', 'ngapa': 'kenapa',
-  'bnyk': 'banyak', 'byk': 'banyak', 'sdkt': 'sedikit', 'dikit': 'sedikit',
-  'eror': 'error', 'erorr': 'error', 'err': 'error', 'rusak': 'gagal', 'problem': 'masalah',
-  'terbnyk': 'terbanyak', 'terbyk': 'terbanyak', 'trakhir': 'terakhir', 'trkhir': 'terakhir',
-  'skrg': 'sekarang', 'skrang': 'sekarang',
-  'kuningg': 'kuning', 'merahh': 'merah', 'blu': 'biru', 'red': 'merah', 'yellow': 'kuning', 'blue': 'biru'
-};
-```
+Modul `isAnalyticQuery()` dan `isRobotControlCommand()` secara ketat membedakan pertanyaan data dari instruksi kontrol fisik:
+- **Analytic Query:** Mengandung tanda tanya (`?`), kata kerja analitis (*analisis*, *analisa*, *evaluasi*, *bandingkan*, *komparasi*, *efektif*), kata tanya (*berapa*, *kapan*, *mengapa*, *bagaimana*), atau kata kuantitas (*rate*, *persentase*, *terbanyak*, *riwayat*). Kueri analitis **bersifat strictly read-only** dan tidak pernah memicu perubahan mode atau jeda sistem.
+- **Robot Control Command:** Hanya cocok dengan pola imperatif eksplisit diawali kata kerja perintah (contoh: *"Ganti mode ke Arm"*, *"Ubah mode ke Servo"*).
 
 ---
 
@@ -159,11 +151,13 @@ $$\text{Error Rate} = \frac{\text{Jumlah Error}}{\text{Total Percobaan}} \times 
 ### 2. Error Rate per Mode Kerja:
 $$\text{Error Rate Mode} = \frac{\text{Jumlah Error Mode}}{\text{Total Percobaan Mode}} \times 100\%$$
 
-### 3. Persentase Warna Produk Berhasil:
-$$\text{Persentase Warna} = \frac{\text{Jumlah Produk Warna Tersebut}}{\text{Total Produk Sukses}} \times 100\%$$
+### 3. Penanganan Mode dengan 0 Percobaan:
+Jika $\text{Total Percobaan Mode} = 0$, fungsi menghasilkan nilai `null` dan dilaporkan sebagai:
+> **"Belum dapat dihitung — tidak ada data percobaan (N/A)"**
+Sistem **tidak boleh** menampilkan 0% atau menyimpulkan mode tersebut bebas error jika belum pernah diuji.
 
-### 4. Penanganan Pembagian Nol (Zero-Division Safe):
-Jika $\text{Total} = 0$, fungsi menghasilkan nilai `0%` secara deterministik tanpa melempar *NaN* atau *Infinity*.
+### 4. Penanganan Database Null / Unreachable:
+Jika database terputus atau null, sistem melaporkan **"Data tidak tersedia"** secara transparan tanpa memunculkan angka 0 palsu.
 
 ---
 
@@ -172,22 +166,17 @@ Jika $\text{Total} = 0$, fungsi menghasilkan nilai `0%` secara deterministik tan
 Seluruh modul Smart Data Assistant telah diuji menggunakan Node.js Test Runner bawaan (`node:test`).
 
 ```powershell
-node --test tests/smart_data_assistant.test.js
+node --test tests/*.test.js
 ```
 
-### Rekapitulasi Hasil Pengujian (13/13 Lulus):
-- ✔ 1. Normalisasi Teks dan Kamus Slang / Typo Bahasa Indonesia
-- ✔ 2. Klasifikasi Intent Kategori A: Statistik Sorting Produk
-- ✔ 3. Klasifikasi Intent Kategori B: Analisis Error dan Kegagalan
-- ✔ 4. Klasifikasi Intent Kategori C: Pola Operasional dan Mode Kerja
-- ✔ 5. Klasifikasi Intent Kategori D: Analisis Waktu dan Tren
-- ✔ 6. Klasifikasi Intent Kategori E: Status Sistem & Hardware
-- ✔ 7. Klasifikasi Intent Kategori F: Ringkasan Umum & Rekomendasi
-- ✔ 8. Ekstraksi dan Normalisasi Record Firebase RTDB
-- ✔ 9. Perhitungan Error Rate Mode & Disclaimer Kausalitas
-- ✔ 10. Penanganan Database Kosong (Zero Data / Graceful Fallback)
-- ✔ 11. Transparansi Waktu WIB (Asia/Jakarta)
-- ✔ 12. Query di Luar Domain (Out-of-Scope Fallback)
-- ✔ 13. Integrasi Runner Utuh (Total Suite Waktu: ~30ms)
+### Rekapitulasi Hasil Pengujian (53/53 Lulus 100%):
+- ✔ ESP32 Wi-Fi Client Adapter: 7/7 tests passing
+- ✔ Sanitasi Formula Injection: 4/4 tests passing
+- ✔ Enkapsulasi String CSV: 3/3 tests passing
+- ✔ Pustaka Pengetahuan R-AI: 3/3 tests passing
+- ✔ Mesin Aturan Automasi: 3/3 tests passing
+- ✔ Keamanan Password Admin: 2/2 tests passing
+- ✔ VERNOVA Smart Data Assistant: 24/24 tests passing
+  - Termasuk 11 skenario pengujian regresi wajib (Bug 1 - Bug 7) dan contextual follow-up.
 
-**Total Test Suite Seluruh Proyek:** 41 pengujian lulus (100% Passing).
+**Total Test Suite Seluruh Proyek:** 53 pengujian lulus (100% Passing).
