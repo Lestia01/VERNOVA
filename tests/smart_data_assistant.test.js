@@ -186,4 +186,18 @@ test('VERNOVA Smart Data Assistant - Zero AI Rule-Based Engine', async (t) => {
     assert.ok(res.answer.toLowerCase().includes('pertanyaan yang dapat anda ajukan'));
     assert.ok(Array.isArray(res.suggestions));
   });
+
+  await t.test('13. Intent Percakapan Ramah (Greeting, Identity, Help)', () => {
+    const gRes = assistant.processQuery('Halo!');
+    assert.equal(gRes.intent, 'GREETING');
+    assert.ok(gRes.answer.includes('Halo!'));
+
+    const idRes = assistant.processQuery('Kamu siapa?');
+    assert.equal(idRes.intent, 'IDENTITY');
+    assert.ok(idRes.answer.includes('VERNOVA Smart Data Assistant'));
+
+    const hRes = assistant.processQuery('Bantuan');
+    assert.equal(hRes.intent, 'HELP');
+    assert.ok(hRes.answer.includes('Analitik Data yang Dapat Anda Tanyakan'));
+  });
 });

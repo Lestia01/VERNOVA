@@ -176,6 +176,29 @@
       ]
     },
 
+    // Conversation & Greetings
+    {
+      id: 'GREETING',
+      category: 'CONVERSATION',
+      patterns: [
+        /\b(halo|hallo|hai|hello|hi|hei|selamat pagi|selamat siang|selamat sore|selamat malam)\b/
+      ]
+    },
+    {
+      id: 'IDENTITY',
+      category: 'CONVERSATION',
+      patterns: [
+        /\b(kamu siapa|siapa kamu|kamu itu apa|kamu ai|nama kamu|namamu|who are you|what are you)\b/
+      ]
+    },
+    {
+      id: 'HELP',
+      category: 'CONVERSATION',
+      patterns: [
+        /\b(bantuan|help|bisa apa|panduan|cara pakai|fungsi kamu)\b/
+      ]
+    },
+
     // Category C: Mode-specific Error Rate (must precede general ERROR_RATE)
     {
       id: 'MODE_ERROR_RATE',
@@ -639,11 +662,23 @@
 
       const intent = detectIntent(normalized);
       const records = extractAllRecords(contextData);
-      const esp32 = contextData.esp32Status || (global.esp32Client ? global.esp32Client.getStatus() : null) || {};
+      let esp32 = contextData.esp32Status;
+      if (!esp32 && typeof global !== 'undefined' && global.esp32Client) {
+        try {
+          esp32 = typeof global.esp32Client.getStatus === 'function' ? global.esp32Client.getStatus() : global.esp32Client;
+        } catch (e) { esp32 = null; }
+      }
+      esp32 = esp32 || {};
       const camera = contextData.cameraStatus || { active: true, fps: 30 };
 
       // Dispatch ke handler intent
       switch (intent) {
+        case 'GREETING':
+          return this.handleGreeting();
+        case 'IDENTITY':
+          return this.handleIdentity();
+        case 'HELP':
+          return this.handleHelp();
         case 'TOTAL_SORTING':
           return this.handleTotalSorting(records, normalized);
         case 'SORTING_BY_COLOR':
@@ -706,6 +741,40 @@
     }
 
     // --- Intent Handlers ---
+
+    handleGreeting() {
+      return {
+        intent: 'GREETING',
+        answer: 'Halo! Saya **VERNOVA Smart Data Assistant**. Saya siap menyajikan data riwayat sortir produk, analisis kegagalan, performa mode Servo/Arm, dan telemetri ESP32 secara instan tanpa model AI eksternal. Ada yang bisa saya bantu analisa?',
+        basis: 'Sistem operasional data assistant siap melayani.',
+        suggestions: ['Total sortir produk', 'Warna apa terbanyak?', 'Kapan error terakhir?', 'Status ESP32']
+      };
+    }
+
+    handleIdentity() {
+      return {
+        intent: 'IDENTITY',
+        answer: 'Saya adalah **VERNOVA Smart Data Assistant**, asisten data cerdas berbasis aturan (*rule-based data engine*) yang mengolah riwayat log aktual lini penyortiran pabrik pintar R-LAB secara deterministik.',
+        basis: 'Arsitektur Zero-LLM & Data-Grounded.',
+        suggestions: ['Ringkasan data saat ini', 'Total sortir produk', 'Status sistem']
+      };
+    }
+
+    handleHelp() {
+      return {
+        intent: 'HELP',
+        answer: [
+          '📌 **Analitik Data yang Dapat Anda Tanyakan:**',
+          '• **Statistik Sortir:** "Berapa total produk?", "Warna apa terbanyak?", "Jumlah sortir warna kuning"',
+          '• **Analisis Error:** "Kapan error terakhir?", "Berapa error rate sistem?", "Mode apa sering error?"',
+          '• **Waktu & Tren:** "Aktivitas hari ini", "Bandingkan hari ini vs kemarin", "Jam paling sibuk"',
+          '• **Status Perangkat:** "Status ESP32", "Status kamera", "Status sistem saat ini"',
+          '• **Ringkasan:** "Beri ringkasan data", "Rekomendasi operator"'
+        ].join('\n'),
+        basis: 'Panduan topik kueri asisten data.',
+        suggestions: ['Total sortir produk', 'Error hari ini', 'Status ESP32', 'Ringkasan data']
+      };
+    }
 
     handleTotalSorting(records, query) {
       if (records.length === 0) {

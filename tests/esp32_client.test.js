@@ -27,6 +27,12 @@ test('ESP32 Wi-Fi Client Adapter (esp32-client.js)', async (t) => {
     assert.equal(res.telemetry.deviceId, 'VERNOVA-ESP32-SIMULATOR');
     assert.equal(res.telemetry.state, 'READY');
     assert.ok(res.telemetry.wifiRssi < 0);
+
+    const statusObj = client.getStatus();
+    assert.equal(typeof statusObj, 'object');
+    assert.equal(statusObj.online, true);
+    assert.equal(statusObj.isSimulated, true);
+    assert.ok(statusObj.freeHeap > 0);
   });
 
   await t.test('Mode Simulasi: Perintah Sortir Warna Valid (Kuning, Biru, Merah)', async () => {

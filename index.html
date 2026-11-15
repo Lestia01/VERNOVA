@@ -3324,12 +3324,22 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   const JL = (id, en) => state.lang === 'en' ? en : id;
   const escJ = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+  function formatChatText(text) {
+    let s = escJ(text);
+    s = s.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+    s = s.replace(/_([^_]+)_/g, '<i>$1</i>');
+    s = s.replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.06);padding:1px 5px;border-radius:4px;font-family:monospace;font-size:0.9em;">$1</code>');
+    s = s.replace(/^&gt;\s*(.*)$/gm, '<div style="border-left:3px solid var(--gold);padding-left:8px;margin:4px 0;opacity:0.9;font-size:0.92em;">$1</div>');
+    s = s.replace(/\n/g, '<br>');
+    return s;
+  }
+
   function jarvisAddMsg(text, who, src) {
     const box = $('jarvis-msgs');
     if (!box) return null;
     const d = document.createElement('div');
     d.className = 'jarvis-msg ' + who;
-    d.innerHTML = escJ(text).replace(/\n/g, '<br>');
+    d.innerHTML = formatChatText(text);
     if (who === 'bot' && src) {
       const cap = document.createElement('span');
       cap.className = 'jarvis-src';
@@ -3842,77 +3852,97 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     if (!raw) return;
     inp.value = '';
     jarvisAddMsg(raw, 'user');
-    try { if (await handleResetConfirm(raw)) return; } catch (e) {}
 
-    const t = ' ' + raw.toLowerCase().trim() + ' ';
-    const has = (...ws) => ws.some(w => t.includes(w));
+    try {
+      if (await handleResetConfirm(raw)) return;
 
-    // 1. Eksekusi Perintah Aksi Kontrol Hardware & Navigasi
-    if (/ubah\s*(ke\s*)?mode\s*arm|ganti\s*(ke\s*)?mode\s*arm|ke\s*mode\s*arm|switch\s*to\s*arm/i.test(t)) {
-      window.changeSortingMode('Arm');
-      jarvisSay(JL('Mode operasional berhasil diubah ke Mode Arm.', 'Operating mode changed to Arm mode.'), true, 'Sistem');
-      renderJarvisChips(['Mode Servo', 'Error rate mode arm', 'Status ESP32']);
-      return;
-    }
-    if (/ubah\s*(ke\s*)?mode\s*servo|ganti\s*(ke\s*)?mode\s*servo|ke\s*mode\s*servo|switch\s*to\s*servo/i.test(t)) {
-      window.changeSortingMode('Servo');
-      jarvisSay(JL('Mode operasional berhasil diubah ke Mode Servo.', 'Operating mode changed to Servo mode.'), true, 'Sistem');
-      renderJarvisChips(['Mode Arm', 'Error rate mode servo', 'Status ESP32']);
-      return;
-    }
-    if (/^(jeda|pause|berhenti sementara|tunda)\b/i.test(t.trim())) {
-      if (state.aiReady && !state.isPaused) window.togglePause();
-      jarvisSay(JL('Sistem AI Vision dijeda sementara.', 'AI Vision system paused.'), true, 'Sistem');
-      return;
-    }
-    if (/^(lanjut|resume|jalankan lagi|mulai lagi)\b/i.test(t.trim())) {
-      if (state.aiReady && state.isPaused) window.togglePause();
-      jarvisSay(JL('Sistem AI Vision dilanjutkan kembali.', 'AI Vision system resumed.'), true, 'Sistem');
-      return;
-    }
-    if (/export\s*(laporan\s*)?(pdf|excel|xlsx|csv)/i.test(t)) {
-      const m = t.match(/pdf|excel|xlsx|csv/i);
-      const fmt = m ? (m[0].toLowerCase() === 'excel' ? 'xlsx' : m[0].toLowerCase()) : 'pdf';
-      window.doExport(fmt);
-      jarvisSay(JL(`Laporan format ${fmt.toUpperCase()} berhasil diekspor.`, `Report exported in ${fmt.toUpperCase()} format.`), true, 'Sistem');
-      return;
-    }
+      const t = ' ' + raw.toLowerCase().trim() + ' ';
+      const has = (...ws) => ws.some(w => t.includes(w));
 
-    // 2. Evaluasi Mesin Analisis Data Pintar (Zero-LLM Smart Data Assistant)
-    if (window.smartDataAssistant) {
-      const dataContext = {
-        smart_factory: state.dbData ? (state.dbData.smart_factory || state.dbData) : null,
-        excelLogs: state.excelLogs,
-        history: state.feed,
-        esp32Status: window.esp32Client ? window.esp32Client.getStatus() : null,
-        cameraStatus: { active: Boolean(state.aiReady && !state.isPaused), fps: state.fps || 30 }
-      };
-
-      const result = window.smartDataAssistant.processQuery(raw, dataContext);
-      if (result && result.intent !== 'UNKNOWN') {
-        const fullMsg = result.answer + (result.basis ? `\n\n_${result.basis}_` : '');
-        jarvisSay(fullMsg, true, 'Smart Data Assistant');
-        if (result.suggestions && result.suggestions.length > 0) {
-          renderJarvisChips(result.suggestions);
-        }
+      // 1. Eksekusi Perintah Aksi Kontrol Hardware & Navigasi
+      if (/ubah\s*(ke\s*)?mode\s*arm|ganti\s*(ke\s*)?mode\s*arm|ke\s*mode\s*arm|switch\s*to\s*arm/i.test(t)) {
+        window.changeSortingMode('Arm');
+        jarvisSay(JL('Mode operasional berhasil diubah ke Mode Arm.', 'Operating mode changed to Arm mode.'), true, 'Sistem');
+        renderJarvisChips(['Mode Servo', 'Error rate mode arm', 'Status ESP32']);
         return;
       }
+      if (/ubah\s*(ke\s*)?mode\s*servo|ganti\s*(ke\s*)?mode\s*servo|ke\s*mode\s*servo|switch\s*to\s*servo/i.test(t)) {
+        window.changeSortingMode('Servo');
+        jarvisSay(JL('Mode operasional berhasil diubah ke Mode Servo.', 'Operating mode changed to Servo mode.'), true, 'Sistem');
+        renderJarvisChips(['Mode Arm', 'Error rate mode servo', 'Status ESP32']);
+        return;
+      }
+      if (/^(jeda|pause|berhenti sementara|tunda)\b/i.test(t.trim())) {
+        if (state.aiReady && !state.isPaused) window.togglePause();
+        jarvisSay(JL('Sistem AI Vision dijeda sementara.', 'AI Vision system paused.'), true, 'Sistem');
+        return;
+      }
+      if (/^(lanjut|resume|jalankan lagi|mulai lagi)\b/i.test(t.trim())) {
+        if (state.aiReady && state.isPaused) window.togglePause();
+        jarvisSay(JL('Sistem AI Vision dilanjutkan kembali.', 'AI Vision system resumed.'), true, 'Sistem');
+        return;
+      }
+      if (/export\s*(laporan\s*)?(pdf|excel|xlsx|csv)/i.test(t)) {
+        const m = t.match(/pdf|excel|xlsx|csv/i);
+        const fmt = m ? (m[0].toLowerCase() === 'excel' ? 'xlsx' : m[0].toLowerCase()) : 'pdf';
+        window.doExport(fmt);
+        jarvisSay(JL(`Laporan format ${fmt.toUpperCase()} berhasil diekspor.`, `Report exported in ${fmt.toUpperCase()} format.`), true, 'Sistem');
+        return;
+      }
+
+      // 2. Evaluasi Mesin Analisis Data Pintar (Zero-LLM Smart Data Assistant)
+      if (window.smartDataAssistant) {
+        let esp32Status = null;
+        try {
+          if (window.esp32Client && typeof window.esp32Client.getStatus === 'function') {
+            esp32Status = window.esp32Client.getStatus();
+          } else if (window.esp32Client) {
+            esp32Status = {
+              online: Boolean(window.esp32Client.simulationMode),
+              state: window.esp32Client.connectionStatus || 'OFFLINE',
+              host: window.esp32Client.host || 'http://192.168.4.1'
+            };
+          }
+        } catch (e) { esp32Status = null; }
+
+        const dataContext = {
+          smart_factory: state.dbData ? (state.dbData.smart_factory || state.dbData) : null,
+          excelLogs: state.excelLogs,
+          history: state.feed,
+          esp32Status: esp32Status,
+          cameraStatus: { active: Boolean(state.aiReady && !state.isPaused), fps: state.fps || 30 }
+        };
+
+        const result = window.smartDataAssistant.processQuery(raw, dataContext);
+        if (result && result.intent !== 'UNKNOWN') {
+          const fullMsg = result.answer + (result.basis ? `\n\n_${result.basis}_` : '');
+          jarvisSay(fullMsg, true, 'Smart Data Assistant');
+          if (result.suggestions && result.suggestions.length > 0) {
+            renderJarvisChips(result.suggestions);
+          }
+          return;
+        }
+      }
+
+      // 3. Fallback jika query berupa interaksi umum / percakapan lokal
+      let handled = false;
+      try { handled = await processCommand(raw); } catch (e) { handled = false; }
+      if (handled) return;
+
+      // 4. Default Fallback Asisten Data (menampilkan opsi bantuan domain)
+      if (window.smartDataAssistant) {
+        const fallback = window.smartDataAssistant.processQuery(raw);
+        jarvisSay(fallback.answer, true, 'Smart Data Assistant');
+        if (fallback.suggestions) renderJarvisChips(fallback.suggestions);
+        return;
+      }
+
+      jarvisSay(localOfflineReply());
+    } catch (err) {
+      console.error('jarvisSend caught error:', err);
+      jarvisSay('Terjadi kendala saat memproses pertanyaan. Silakan coba pertanyaan data sortir, error, atau status ESP32.', true, 'Smart Data Assistant');
+      renderJarvisChips(['Total sortir?', 'Warna terbanyak', 'Status ESP32']);
     }
-
-    // 3. Fallback jika query berupa interaksi umum / percakapan lokal
-    let handled = false;
-    try { handled = await processCommand(raw); } catch (e) { handled = false; }
-    if (handled) return;
-
-    // 4. Default Fallback Asisten Data (menampilkan opsi bantuan domain)
-    if (window.smartDataAssistant) {
-      const fallback = window.smartDataAssistant.processQuery(raw);
-      jarvisSay(fallback.answer, true, 'Smart Data Assistant');
-      if (fallback.suggestions) renderJarvisChips(fallback.suggestions);
-      return;
-    }
-
-    jarvisSay(localOfflineReply());
   };
 
   /* Jawaban lokal pamungkas: selalu jawab dari data mesin walau semua API mati. */

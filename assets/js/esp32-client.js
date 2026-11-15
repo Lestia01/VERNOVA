@@ -109,6 +109,28 @@
     }
 
     /**
+     * Mengambil snapshot status koneksi & telemetri ESP32
+     */
+    getStatus() {
+      const isOnline = Boolean(
+        this.simulationMode ||
+        this.connectionStatus === 'READY' ||
+        this.connectionStatus === 'SIMULATED' ||
+        this.connectionStatus === 'BUSY'
+      );
+      return {
+        online: isOnline,
+        state: this.connectionStatus,
+        host: this.host,
+        isSimulated: this.simulationMode,
+        rssi: this.lastTelemetry ? this.lastTelemetry.wifiRssi : (this.simulationMode ? -42 : null),
+        freeHeap: this.lastTelemetry ? this.lastTelemetry.freeHeap : (this.simulationMode ? 218400 : null),
+        uptimeMs: this.lastTelemetry ? (this.lastTelemetry.uptimeSec * 1000) : 0,
+        currentMode: this.lastTelemetry ? (this.lastTelemetry.mode || 'Servo') : 'Servo'
+      };
+    }
+
+    /**
      * Lakukan fetch dengan pembatasan waktu timeout
      */
     async _fetchWithTimeout(url, fetchOpts = {}) {
