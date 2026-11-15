@@ -174,3 +174,38 @@
 - [M] **ESP-008 (P0)**: Pengujian Integrasi Fisik Lengan Robotik di Lapangan
   - **Status:** `[M] PERLU PENGUJIAN MANUAL` (Memerlukan board ESP32 fisik yang diflash dan dihubungkan ke motor servo nyata di lini sorting).
   - **File:** `firmware/esp32_vernova_sorting/esp32_vernova_sorting.ino`, `docs/ESP32_SETUP_GUIDE.md`.
+
+---
+
+## 6. P1 — MIGRASI R-AI MENJADI SMART DATA ASSISTANT (ZERO-LLM V2.3)
+
+- [x] **SDA-001 (P1)**: Modul Inti Smart Data Assistant Deterministik
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Membuat `assets/js/smart-data-assistant.js` dengan arsitektur murni JavaScript zero-dependency, bebas model AI/LLM, normalisasi teks slang Indonesia, dan evaluasi berbasis zona waktu WIB (`Asia/Jakarta`).
+  - **File:** `assets/js/smart-data-assistant.js`.
+
+- [x] **SDA-002 (P1)**: Taksonomi Intent Lengkap Kategori A s.d. F
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Mengimplementasikan pola intent untuk statistik sortir (total, per warna, terbanyak/tersedikit), analisis kegagalan (error terakhir, list error, error hari ini, error rate), komparasi mode kerja (Servo vs Arm), tren waktu (hari ini vs kemarin, jam sibuk), status hardware (ESP32, kamera), serta ringkasan & rekomendasi SOP.
+  - **File:** `assets/js/smart-data-assistant.js`.
+
+- [x] **SDA-003 (P1)**: Integritas Data & Catatan Etika Kausalitas
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Setiap respons menyajikan basis perhitungan eksplisit (`Dihitung dari N data...`) dan disclaimer korelasi vs kausalitas pada analisis error mode kerja.
+  - **File:** `assets/js/smart-data-assistant.js`.
+
+- [x] **SDA-004 (P1)**: Integrasi Antarmuka Web & Suggestion Chips Dinamis
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Mengintegrasikan `smartDataAssistant` pada dialog chat `index.html` dan `guest.html`, merender *suggestion chips* interaktif dinamis, serta mengeliminasi pemanggilan `pollinations.ai` dan LLM eksternal.
+  - **File:** `index.html`, `guest.html`.
+
+- [x] **SDA-005 (P1)**: Suite Pengujian Otomatis (13 Unit Tests Baru)
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Hasil:** 41/41 unit tests lulus 100% pada suite pengujian proyek tanpa regresi.
+  - **File:** `tests/smart_data_assistant.test.js`.
+
+- [x] **SDA-006 (P1)**: Dokumentasi Lengkap Smart Data Assistant
+  - **Status:** `[x] SELESAI DAN TERVERIFIKASI`
+  - **Solusi:** Menyusun dokumen arsitektur dan spesifikasi menyeluruh di `docs/SMART_DATA_ASSISTANT.md`.
+  - **File:** `docs/SMART_DATA_ASSISTANT.md`.
+

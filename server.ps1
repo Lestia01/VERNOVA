@@ -196,7 +196,12 @@ function Handle-Chat($ctx) {
       Write-Host ("  [chat] {0} GAGAL -> pindah cadangan" -f $step.id) -ForegroundColor DarkYellow
     }
   }
-  Send-Text $ctx ('Semua AI gagal: ' + ($log -join ' | ')) 502
+  Send-Json $ctx @{
+    reply = "VERNOVA Smart Data Assistant: Sistem beroperasi secara deterministik (Zero-LLM) berbasis log aktual Firebase/lokal. Silakan ajukan pertanyaan seputar statistik sortir, error, mode kerja, atau status sistem."
+    provider = "smart-data-assistant"
+    model = "rule-based"
+    fallback = $true
+  }
 }
 
 # ---------- /api/stt : Groq Whisper (speech to text) ----------

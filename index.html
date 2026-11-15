@@ -32,6 +32,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <script src="assets/js/esp32-client.js"></script>
+<script src="assets/js/smart-data-assistant.js"></script>
 
   <style>
   /* ================= THEME TOKENS ================= */
@@ -1293,12 +1294,12 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     </div>
   </div>
 
-  <!-- ===================== JARVIS ===================== -->
-  <button id="jarvis-fab" aria-label="Buka R-AI" onclick="window.jarvisToggle()"><i class="fas fa-robot"></i></button>
-  <div id="jarvis-panel" role="dialog" aria-label="R-AI R-LAB">
+  <!-- ===================== VERNOVA SMART DATA ASSISTANT ===================== -->
+  <button id="jarvis-fab" aria-label="Buka VERNOVA Smart Data Assistant" onclick="window.jarvisToggle()"><i class="fas fa-brain"></i></button>
+  <div id="jarvis-panel" role="dialog" aria-label="VERNOVA Smart Data Assistant">
     <div class="jarvis-head">
       <img src="logo.png" alt="R-LAB">
-      <div class="t"><b>R-AI</b><small id="jarvis-sub">Asisten AI dari R-LAB · siap membantu</small></div>
+      <div class="t"><b>VERNOVA</b><small id="jarvis-sub">Smart Data Assistant · Zero AI Model · Data Nyata</small></div>
       <button class="icon-btn" id="jarvis-voice-btn" title="Suara on/off" onclick="window.jarvisSpeakerToggle()" style="width:32px;height:32px;"><i class="fas fa-volume-up text-xs"></i></button>
       <button class="icon-btn" title="Tutup" onclick="window.jarvisToggle(false)" style="width:32px;height:32px;"><i class="fas fa-xmark text-xs"></i></button>
     </div>
@@ -1306,7 +1307,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     <div class="jarvis-chips" id="jarvis-chips"></div>
     <div class="jarvis-input">
       <button class="icon-btn" id="jarvis-mic" title="Bicara" onclick="window.jarvisListen()"><i class="fas fa-microphone text-xs"></i></button>
-      <input type="text" id="jarvis-text" class="inp" placeholder="Tanya / perintah R-AI..." autocomplete="off" onkeydown="if(event.key==='Enter')window.jarvisSend()">
+      <input type="text" id="jarvis-text" class="inp" placeholder="Tanya data sortir, error, mode, status ESP32..." autocomplete="off" onkeydown="if(event.key==='Enter')window.jarvisSend()">
       <button class="btn-primary px-3" title="Kirim" onclick="window.jarvisSend()"><i class="fas fa-paper-plane text-xs"></i></button>
     </div>
   </div>
@@ -3494,19 +3495,20 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       if (!jarvisOpened) {
         jarvisOpened = true;
         jarvisSay(JL(
-          'Halo! Saya R-AI, AI dari produsen R-LAB. Tanya status, perintahkan perangkat, atau buat aturan otomatis. Coba: "total berapa?" atau "ubah ke mode arm".',
-          'Hello! I am R-AI, AI from R-LAB. Ask status, command devices, or create automation rules. Try: "how many total?" or "change to arm mode".'
+          'Halo! Saya VERNOVA Smart Data Assistant. Sistem analitik cerdas berbasis data riwayat aktual, tanpa model AI eksternal. Silakan tanyakan data sortir, analisis error, kinerja mode robot, atau status sistem.',
+          'Hello! I am VERNOVA Smart Data Assistant. Rule-based smart analytics for real sorting history, without external AI models. Ask about sorting stats, error analysis, robot modes, or system status.'
         ), false);
       }
       setTimeout(() => { const i = $('jarvis-text'); if (i) i.focus(); }, 250);
     }
   };
-  function renderJarvisChips() {
+  function renderJarvisChips(customChips) {
     const box = $('jarvis-chips');
     if (!box) return;
-    const chips = state.lang === 'en'
-      ? ['Status', 'Total?', 'Arm mode', 'Export PDF', 'Make a rule', 'Help']
-      : ['Status', 'Total berapa?', 'Mode arm', 'Export PDF', 'Buat aturan', 'Bantuan'];
+    const defaultChips = state.lang === 'en'
+      ? ['Total sorted?', 'Most sorted color', 'Latest error?', 'Error rate', 'ESP32 status', 'General summary']
+      : ['Total sortir?', 'Warna terbanyak', 'Kapan error terakhir?', 'Error rate sistem', 'Status ESP32', 'Ringkasan data'];
+    const chips = (Array.isArray(customChips) && customChips.length > 0) ? customChips : defaultChips;
     box.innerHTML = '';
     chips.forEach(c => {
       const b = document.createElement('button');
@@ -3558,46 +3560,23 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       ', AIvision=' + (state.aiReady ? (state.isPaused ? 'paused' : 'online') : 'off') +
       ', aturanAktif=' + loadRules().filter(r => r.enabled).length + errCtx + '.';
   }
-const FREE_TIMEOUT = 8000;
-async function askRaiFree(q) {
-  const ctrl = new AbortController();
-  const to = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, FREE_TIMEOUT);
-  try {
-    const full = 'Kamu R-AI, AI buatan R-LAB untuk pabrik sortir pintar. Jawab singkat. Pertanyaan: ' + q;
-    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(full.slice(0, 900)), { signal: ctrl.signal });
-    if (!r.ok) throw new Error('free ' + r.status);
-    let a = (await r.text() || '').trim();
-    a = a.replace(/saya adalah gemini|aku adalah gemini|i am gemini|i'm gemini/gi, 'saya R-AI').replace(/google/gi, 'R-LAB');
-    if (!a) throw new Error('empty');
-    return a;
-  } finally { clearTimeout(to); }
-}
+  /* ============================================================
+     Zero-LLM Architecture: Menggantikan panggilan LLM eksternal
+     dengan SmartDataAssistant deterministik berbasis aturan & data nyata.
+     ============================================================ */
   async function askRai(q) {
-    let a;
-    try {
-      a = await raiFetch(q);
-    } catch (e) {
-      raiBackendOK = false;
-      try {
-        const free = await askRaiFree(q);
-        if (free) return { text: free, actions: [] };
-      } catch (e2) {}
-      throw e;
+    if (window.smartDataAssistant) {
+      const dataContext = {
+        smart_factory: state.dbData ? (state.dbData.smart_factory || state.dbData) : null,
+        excelLogs: state.excelLogs,
+        history: state.feed,
+        esp32Status: window.esp32Client ? window.esp32Client.getStatus() : null,
+        cameraStatus: { active: Boolean(state.aiReady && !state.isPaused), fps: state.fps || 30 }
+      };
+      const res = window.smartDataAssistant.processQuery(q, dataContext);
+      return { text: res.answer, actions: [] };
     }
-    a = a.replace(/saya adalah gemini|aku adalah gemini|i am gemini|i'm gemini/gi, 'saya R-AI')
-         .replace(/chatgpt|gpt-oss|openai|langchain/i, 'R-LAB');
-    if (!a) throw new Error('empty');
-    const actions = [];
-    const mMode = a.match(/\[MODE:(Arm|Servo)\]/i);
-    if (mMode) actions.push({ t: 'mode', a: mMode[1].toLowerCase() === 'arm' ? 'Arm' : 'Servo' });
-    if (/\[PAUSE\]/i.test(a)) actions.push({ t: 'pause' });
-    if (/\[RESUME\]/i.test(a)) actions.push({ t: 'resume' });
-    if (/\[TIMEOUT\]/i.test(a)) actions.push({ t: 'timeout' });
-    if (/\[MISSORT\]/i.test(a)) actions.push({ t: 'missort' });
-    const mExp = a.match(/\[EXPORT:(pdf|xlsx|csv)\]/i);
-    if (mExp) actions.push({ t: 'export', a: mExp[1].toLowerCase() });
-    const text = a.replace(/\[(MODE:(Arm|Servo)|PAUSE|RESUME|TIMEOUT|MISSORT|EXPORT:(pdf|xlsx|csv))\]/gi, '').trim();
-    return { text: text || a, actions };
+    return { text: 'Smart Data Assistant siap melayani.', actions: [] };
   }
   function runRaiActions(actions) {
     (actions || []).forEach(x => {
@@ -3864,26 +3843,75 @@ async function askRaiFree(q) {
     inp.value = '';
     jarvisAddMsg(raw, 'user');
     try { if (await handleResetConfirm(raw)) return; } catch (e) {}
-    const typing = jarvisAddMsg('...', 'bot');
-    if (typing) typing.classList.add('typing');
-    let raiErr = null;
-    try {
-      const res = await askRai(raw);
-      if (typing) typing.remove();
-      runRaiActions(res.actions);
-      jarvisSay(res.text || JL('Siap.', 'Done.'), true, 'Model');
+
+    const t = ' ' + raw.toLowerCase().trim() + ' ';
+    const has = (...ws) => ws.some(w => t.includes(w));
+
+    // 1. Eksekusi Perintah Aksi Kontrol Hardware & Navigasi
+    if (/ubah\s*(ke\s*)?mode\s*arm|ganti\s*(ke\s*)?mode\s*arm|ke\s*mode\s*arm|switch\s*to\s*arm/i.test(t)) {
+      window.changeSortingMode('Arm');
+      jarvisSay(JL('Mode operasional berhasil diubah ke Mode Arm.', 'Operating mode changed to Arm mode.'), true, 'Sistem');
+      renderJarvisChips(['Mode Servo', 'Error rate mode arm', 'Status ESP32']);
       return;
-    } catch (e) {
-      if (typing) typing.remove();
-      raiErr = e;
     }
+    if (/ubah\s*(ke\s*)?mode\s*servo|ganti\s*(ke\s*)?mode\s*servo|ke\s*mode\s*servo|switch\s*to\s*servo/i.test(t)) {
+      window.changeSortingMode('Servo');
+      jarvisSay(JL('Mode operasional berhasil diubah ke Mode Servo.', 'Operating mode changed to Servo mode.'), true, 'Sistem');
+      renderJarvisChips(['Mode Arm', 'Error rate mode servo', 'Status ESP32']);
+      return;
+    }
+    if (/^(jeda|pause|berhenti sementara|tunda)\b/i.test(t.trim())) {
+      if (state.aiReady && !state.isPaused) window.togglePause();
+      jarvisSay(JL('Sistem AI Vision dijeda sementara.', 'AI Vision system paused.'), true, 'Sistem');
+      return;
+    }
+    if (/^(lanjut|resume|jalankan lagi|mulai lagi)\b/i.test(t.trim())) {
+      if (state.aiReady && state.isPaused) window.togglePause();
+      jarvisSay(JL('Sistem AI Vision dilanjutkan kembali.', 'AI Vision system resumed.'), true, 'Sistem');
+      return;
+    }
+    if (/export\s*(laporan\s*)?(pdf|excel|xlsx|csv)/i.test(t)) {
+      const m = t.match(/pdf|excel|xlsx|csv/i);
+      const fmt = m ? (m[0].toLowerCase() === 'excel' ? 'xlsx' : m[0].toLowerCase()) : 'pdf';
+      window.doExport(fmt);
+      jarvisSay(JL(`Laporan format ${fmt.toUpperCase()} berhasil diekspor.`, `Report exported in ${fmt.toUpperCase()} format.`), true, 'Sistem');
+      return;
+    }
+
+    // 2. Evaluasi Mesin Analisis Data Pintar (Zero-LLM Smart Data Assistant)
+    if (window.smartDataAssistant) {
+      const dataContext = {
+        smart_factory: state.dbData ? (state.dbData.smart_factory || state.dbData) : null,
+        excelLogs: state.excelLogs,
+        history: state.feed,
+        esp32Status: window.esp32Client ? window.esp32Client.getStatus() : null,
+        cameraStatus: { active: Boolean(state.aiReady && !state.isPaused), fps: state.fps || 30 }
+      };
+
+      const result = window.smartDataAssistant.processQuery(raw, dataContext);
+      if (result && result.intent !== 'UNKNOWN') {
+        const fullMsg = result.answer + (result.basis ? `\n\n_${result.basis}_` : '');
+        jarvisSay(fullMsg, true, 'Smart Data Assistant');
+        if (result.suggestions && result.suggestions.length > 0) {
+          renderJarvisChips(result.suggestions);
+        }
+        return;
+      }
+    }
+
+    // 3. Fallback jika query berupa interaksi umum / percakapan lokal
     let handled = false;
     try { handled = await processCommand(raw); } catch (e) { handled = false; }
     if (handled) return;
-    try {
-      const kr = window.raiKnowledgeReply ? window.raiKnowledgeReply(raw, state.sortingData, state.lang) : null;
-      if (kr) { jarvisSay(kr); return; }
-    } catch (e) {}
+
+    // 4. Default Fallback Asisten Data (menampilkan opsi bantuan domain)
+    if (window.smartDataAssistant) {
+      const fallback = window.smartDataAssistant.processQuery(raw);
+      jarvisSay(fallback.answer, true, 'Smart Data Assistant');
+      if (fallback.suggestions) renderJarvisChips(fallback.suggestions);
+      return;
+    }
+
     jarvisSay(localOfflineReply());
   };
 

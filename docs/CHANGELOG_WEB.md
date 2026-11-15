@@ -5,6 +5,35 @@ Format mengikuti prinsip [Keep a Changelog](https://keepachangelog.com/id/1.0.0/
 
 ---
 
+## [2.3.0] - 2026-11-15
+
+### Ditambahkan (Added)
+- **Modul Inti Smart Data Assistant (`assets/js/smart-data-assistant.js`):**
+  - Mesin asisten data deterministik 100% tanpa model AI / LLM (*zero-LLM architecture*).
+  - Normalisasi teks bahasa Indonesia dan kamus slang/singkatan (*typo expander*).
+  - Klasifikasi intent multi-kategori (Kategori A: Statistik Sorting, Kategori B: Analisis Error, Kategori C: Pola Mode Kerja, Kategori D: Analisis Waktu & Tren, Kategori E: Status Sistem & Hardware, Kategori F: Ringkasan & SOP Masalah).
+  - Penanganan batas waktu presisi berbasis zona waktu WIB (UTC+7 / `Asia/Jakarta`).
+  - Agregasi data aktual dari Firebase Realtime Database path `smart_factory/sorting_line` dan cache lokal.
+  - Perhitungan persentase error rate transparan: `errorRate = (errors / total) * 100%`.
+  - Catatan basis perhitungan eksplisit pada setiap jawaban.
+  - *Disclaimer* etika data pemisahan korelasi frekuensi mode terhadap kausalitas kerusakan mekanis hardware.
+- **Suite Pengujian Unit Smart Data Assistant (`tests/smart_data_assistant.test.js`):**
+  - 13 test case komprehensif mencakup normalisasi teks, 20+ intent patterns, agregasi record Firebase, perhitungan formula, penanganan database kosong, dan fallback terarah.
+  - Total pengujian unit proyek kini mencapai 41 passing (100% lulus, 0 gagal).
+- **Dokumentasi Teknis Lengkap (`docs/SMART_DATA_ASSISTANT.md`):**
+  - Panduan arsitektur, taksonomi intent, formula statistik, dan analisis keamanan tanpa kebocoran data.
+
+### Diubah (Changed)
+- **Antarmuka Pengguna & Panel Asisten (`index.html` & `guest.html`):**
+  - Branding diperbarui dari "R-AI" menjadi "VERNOVA Smart Data Assistant".
+  - Dialog chat kini menyajikan *dynamic suggestion chips* interaktif setelah setiap jawaban.
+  - Pemanggilan eksternal `https://text.pollinations.ai/` dan dependensi token LLM dilepas sepenuhnya.
+  - Perintah suara STT/TTS tetap didukung secara lokal.
+- **Backend Lokal (`server.ps1`):**
+  - Endpoint `/api/chat` diperbarui dengan respons deterministik ramah tanpa melempar HTTP 502 bila API eksternal tidak aktif.
+
+---
+
 ## [2.2.0] - 2026-11-15
 
 ### Ditambahkan (Added)

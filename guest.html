@@ -26,6 +26,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<script src="assets/js/esp32-client.js"></script>
+<script src="assets/js/smart-data-assistant.js"></script>
 
 <style>
 :root{
@@ -1803,9 +1805,32 @@ window.jarvisSend = async () => {
   const t = ' ' + raw.toLowerCase().trim() + ' ';
   const has = (...ws) => ws.some(w => t.includes(w));
   const d = state.sortingData;
+
+  // Cek kontrol yang terkunci di mode guest
+  if (has('ubah', 'ganti', 'reset', 'force', 'missort', 'jeda', 'pause') && (has('mode', 'arm', 'servo', 'data', 'timeout', 'sistem'))) {
+    jarvisSay(GUEST_LOCKED(), true, 'Guest');
+    return;
+  }
+
+  // Gunakan Smart Data Assistant
+  if (window.smartDataAssistant) {
+    const dataContext = {
+      smart_factory: state.dbData ? (state.dbData.smart_factory || state.dbData) : null,
+      excelLogs: state.exportLogs,
+      esp32Status: window.esp32Client ? window.esp32Client.getStatus() : null,
+      cameraStatus: { active: true, fps: 30 }
+    };
+    const result = window.smartDataAssistant.processQuery(raw, dataContext);
+    if (result && result.intent !== 'UNKNOWN') {
+      const fullMsg = result.answer + (result.basis ? `\n\n_${result.basis}_` : '');
+      jarvisSay(fullMsg, true, 'Smart Data Assistant');
+      return;
+    }
+  }
+
   let reply = null;
   if (has('halo', 'hallo', 'hai', 'hello', 'hi ', 'pagi', 'siang', 'sore', 'malam', 'hei')) {
-    reply = JL('Halo juga! Saya R-AI dari R-LAB. Mau cek status apa?', 'Hello! I am R-AI from R-LAB. What status to check?');
+    reply = JL('Halo juga! Saya VERNOVA Smart Data Assistant. Mau cek status atau data apa?', 'Hello! I am VERNOVA Smart Data Assistant. What status or data to check?');
   } else if (/kamu (ai|siapa)|siapa kamu|kamu (itu )?apa|nama kamu|namamu|what are you|who are you|your name/.test(t)) {
     reply = JL('Saya R-AI — AI buatan R-LAB, gabungan dari beberapa model AI.', 'I am R-AI — an AI by R-LAB, a combination of several AI models.');
   } else if (has('database apa', 'database yang', 'database mana', 'data apa', 'isi database', 'lihat database', 'password', 'api key', 'apikey', 'kunci', 'kredensial', 'credential', 'token rahasia', 'firebase')) {
