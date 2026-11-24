@@ -27,6 +27,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <script src="assets/js/esp32-client.js"></script>
+<script src="assets/js/device-manager.js"></script>
 <script src="assets/js/smart-data-assistant.js"></script>
 
 <style>
@@ -678,6 +679,14 @@ const SYNC_DELAY_MS = 500; // selisih ±0.5 detik mengikuti admin
 
 const state = { lang: 'id', chart: null, chartYMax: 5, sortingData: { kuning: 0, biru: 0, merah: 0, gagal: 0, total: 0 }, exportLogs: [], _delayT: null, _retries: 0 };
 const $ = (id) => document.getElementById(id);
+
+// Unified Device Manager & Client Proxy
+if (typeof DeviceConnectionManager !== 'undefined') {
+  window.deviceManager = new DeviceConnectionManager();
+  window.esp32Client = window.deviceManager.createLegacyEsp32ClientProxy();
+} else if (typeof Esp32Client !== 'undefined') {
+  window.esp32Client = new Esp32Client();
+}
 
 const I18N = {
   id: {

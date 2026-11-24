@@ -32,6 +32,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <script src="assets/js/esp32-client.js"></script>
+<script src="assets/js/device-manager.js"></script>
 <script src="assets/js/smart-data-assistant.js"></script>
 
   <style>
@@ -712,7 +713,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         <img src="logo.png" alt="Logo R-LAB" class="w-9 h-9 rounded-lg shrink-0 lg:hidden" style="object-fit:cover;border:1px solid var(--border)">
 
         <div class="status-group" role="status" aria-label="Status koneksi">
-          <div id="status-esp32" class="pill" onclick="window.openModal('esp32-modal')" title="ESP32 Wi-Fi Status (Klik untuk Konfigurasi)" style="cursor:pointer">ESP32: OFFLINE</div>
+          <div id="status-esp32" class="pill" onclick="window.openDeviceManagerModal()" title="Device Connection Status (Klik untuk Konfigurasi)" style="cursor:pointer">DEVICE: OFFLINE</div>
           <div id="status-fb" class="pill">FB: OFFLINE</div>
           <div id="status-tm" class="pill">AI: STANDBY</div>
         </div>
@@ -727,8 +728,8 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <i class="fas fa-database text-xs"></i>
           </button>
 
-          <button id="btn-conn-esp32" onclick="window.openModal('esp32-modal')" class="btn-primary px-3 py-2 text-[10px] flex items-center gap-2" title="ESP32 Wi-Fi Configuration">
-            <i class="fas fa-wifi"></i><span class="hidden sm:inline" data-i18n="btn.connectEsp32">ESP32 WI-FI</span>
+          <button id="btn-conn-esp32" onclick="window.openDeviceManagerModal()" class="btn-primary px-3 py-2 text-[10px] flex items-center gap-2" title="Device & Connection Manager">
+            <i id="btn-device-icon" class="fas fa-microchip"></i><span id="btn-device-label" class="hidden sm:inline">DEVICE MANAGER</span>
           </button>
 
         <button onclick="window.logoutAdmin()" class="icon-btn" title="Back to Home">
@@ -1144,69 +1145,187 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     </div>
   </div>
 
-  <!-- ===================== MODAL: ESP32 WI-FI CONFIG ===================== -->
+  <!-- ===================== MODAL: DEVICE & CONNECTION MANAGER ===================== -->
   <div id="esp32-modal" class="modal">
     <div class="modal-backdrop" onclick="window.closeModal('esp32-modal')"></div>
-    <div class="modal-panel">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="font-black text-base flex items-center gap-2">
-          <i class="fas fa-wifi" style="color:var(--brand)"></i>
-          <span>Koneksi ESP32 Wi-Fi</span>
-        </h3>
+    <div class="modal-panel max-w-lg">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white shadow-sm" style="background:var(--brand)">
+            <i class="fas fa-microchip text-sm"></i>
+          </div>
+          <div>
+            <h3 class="font-black text-sm sm:text-base leading-tight t-main flex items-center gap-1.5">
+              <span>Device &amp; Connection Manager</span>
+              <span class="text-[9px] px-2 py-0.5 rounded-full font-bold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">Admin</span>
+            </h3>
+            <p class="text-[10px] t-muted">Konfigurasi perangkat robotik mikrokontroler &amp; protokol komunikasi</p>
+          </div>
+        </div>
         <button onclick="window.closeModal('esp32-modal')" class="icon-btn"><i class="fas fa-xmark text-xs"></i></button>
       </div>
 
-      <div class="space-y-4 text-xs">
+      <div class="space-y-3.5 text-xs">
+        <!-- 1. Pilihan Mikrokontroler Hardware -->
         <div>
-          <label class="block font-bold mb-1 t-main">Alamat IP / Host ESP32</label>
+          <label class="block font-bold mb-1.5 t-main text-[11px] uppercase tracking-wider">1. Pilih Mikrokontroler</label>
+          <div class="grid grid-cols-2 gap-2">
+            <!-- ESP32 Option -->
+            <label id="opt-device-esp32" class="device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20">
+              <input type="radio" name="dev-type-select" value="ESP32" checked onchange="window.onDeviceSelectChange(this.value)" class="sr-only">
+              <div class="flex items-center justify-between mb-1">
+                <span class="font-black text-xs t-main flex items-center gap-1.5">
+                  <i class="fas fa-bolt text-amber-500"></i> ESP32 DevKit V1
+                </span>
+                <i id="icon-check-esp32" class="fas fa-circle-check text-blue-600 text-xs"></i>
+              </div>
+              <p class="text-[10px] t-muted leading-relaxed">Dual core 32-bit dengan Wi-Fi 2.4GHz &amp; BLE onboard.</p>
+            </label>
+
+            <!-- micro:bit Option -->
+            <label id="opt-device-microbit" class="device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400">
+              <input type="radio" name="dev-type-select" value="MICROBIT" onchange="window.onDeviceSelectChange(this.value)" class="sr-only">
+              <div class="flex items-center justify-between mb-1">
+                <span class="font-black text-xs t-main flex items-center gap-1.5">
+                  <i class="fas fa-cube text-emerald-500"></i> BBC micro:bit
+                </span>
+                <i id="icon-check-microbit" class="far fa-circle text-slate-400 text-xs"></i>
+              </div>
+              <p class="text-[10px] t-muted leading-relaxed">Nordic nRF52833 dengan MakeCode BLE UART service.</p>
+            </label>
+          </div>
+        </div>
+
+        <!-- 2. Pilihan Protokol Komunikasi -->
+        <div>
+          <label class="block font-bold mb-1.5 t-main text-[11px] uppercase tracking-wider">2. Metode Koneksi</label>
+          <div class="grid grid-cols-2 gap-2">
+            <!-- Wi-Fi REST -->
+            <label id="opt-conn-wifi" class="conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20">
+              <input type="radio" name="conn-type-select" value="WIFI" checked onchange="window.onConnSelectChange(this.value)" class="sr-only">
+              <div class="flex items-center justify-between mb-0.5">
+                <span class="font-bold text-xs t-main flex items-center gap-1.5">
+                  <i class="fas fa-wifi text-blue-500"></i> Wi-Fi (HTTP REST)
+                </span>
+                <i id="icon-check-wifi" class="fas fa-circle-check text-blue-600 text-xs"></i>
+              </div>
+              <p class="text-[10px] t-muted">SoftAP 192.168.4.1 / Jaringan LAN lokal sekolah.</p>
+            </label>
+
+            <!-- BLE -->
+            <label id="opt-conn-ble" class="conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400">
+              <input type="radio" name="conn-type-select" value="BLE" onchange="window.onConnSelectChange(this.value)" class="sr-only">
+              <div class="flex items-center justify-between mb-0.5">
+                <span class="font-bold text-xs t-main flex items-center gap-1.5">
+                  <i class="fab fa-bluetooth-b text-indigo-500"></i> Bluetooth (BLE)
+                </span>
+                <i id="icon-check-ble" class="far fa-circle text-slate-400 text-xs"></i>
+              </div>
+              <p class="text-[10px] t-muted">Web Bluetooth GATT Nordic UART Service.</p>
+            </label>
+          </div>
+
+          <!-- Microbit Wi-Fi Notice -->
+          <div id="mbit-wifi-disabled-note" class="hidden mt-1.5 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 text-[10px] border border-amber-200 dark:border-amber-800 flex items-center gap-2">
+            <i class="fas fa-circle-info"></i>
+            <span>BBC micro:bit tidak memiliki chip Wi-Fi bawaan. Jalur koneksi dikunci pada <strong>Bluetooth Low Energy (BLE)</strong>.</span>
+          </div>
+        </div>
+
+        <!-- 3. Parameter Konfigurasi -->
+        <!-- Bagian A: Wi-Fi Setup Form -->
+        <div id="section-config-wifi" class="space-y-2 p-3 rounded-xl border" style="background:var(--surface-soft);border-color:var(--border)">
+          <div class="flex items-center justify-between">
+            <label class="font-bold text-[11px] t-main">Alamat IP / Host REST API</label>
+            <span class="text-[10px] text-emerald-600 font-mono font-bold">Port :80</span>
+          </div>
           <div class="flex gap-2">
             <input type="text" id="esp32-host-input" class="inp flex-1 font-mono text-[11px]" placeholder="http://192.168.4.1" value="http://192.168.4.1">
-            <button id="btn-esp32-ping" onclick="window.pingEsp32()" class="btn-primary px-3 py-2 text-[11px] whitespace-nowrap">
+            <button id="btn-esp32-ping" onclick="window.pingCurrentDevice()" class="btn-primary px-3 py-1.5 text-[11px] whitespace-nowrap">
               <i class="fas fa-bolt mr-1"></i>Test Ping
             </button>
           </div>
-          <div class="flex flex-wrap gap-1.5 mt-2">
+          <div class="flex flex-wrap gap-1.5 pt-0.5">
             <span class="text-[10px] t-muted mr-1">Preset:</span>
             <button type="button" onclick="document.getElementById('esp32-host-input').value='http://192.168.4.1'" class="text-[10px] px-2 py-0.5 rounded border t-main hover:bg-slate-200 dark:hover:bg-slate-700">192.168.4.1 (SoftAP)</button>
-            <button type="button" onclick="document.getElementById('esp32-host-input').value=window.location.origin+'/api/esp32'" class="text-[10px] px-2 py-0.5 rounded border t-main hover:bg-slate-200 dark:hover:bg-slate-700">Proxy Lokal (/api/esp32)</button>
+            <button type="button" onclick="document.getElementById('esp32-host-input').value=window.location.origin+'/api/esp32'" class="text-[10px] px-2 py-0.5 rounded border t-main hover:bg-slate-200 dark:hover:bg-slate-700">Proxy (/api/esp32)</button>
+            <button type="button" onclick="document.getElementById('esp32-host-input').value='http://192.168.1.100'" class="text-[10px] px-2 py-0.5 rounded border t-main hover:bg-slate-200 dark:hover:bg-slate-700">LAN (192.168.1.100)</button>
           </div>
         </div>
 
-        <div class="flex items-center justify-between p-3.5 rounded-xl border" style="background:var(--surface-soft);border-color:var(--border)">
+        <!-- Bagian B: BLE Setup Form -->
+        <div id="section-config-ble" class="hidden space-y-2.5 p-3 rounded-xl border" style="background:var(--surface-soft);border-color:var(--border)">
+          <div class="flex items-center justify-between">
+            <label class="font-bold text-[11px] t-main">Filter Nama Perangkat BLE</label>
+            <span class="text-[10px] t-muted font-mono">UART UUID: 6E400001</span>
+          </div>
+          <input type="text" id="ble-name-input" class="inp w-full font-mono text-[11px]" placeholder="VERNOVA atau BBC micro:bit" value="VERNOVA">
+          
+          <!-- Banner Kompatibilitas Browser Web Bluetooth -->
+          <div id="ble-compat-banner" class="p-2.5 rounded-lg text-[10px] border"></div>
+        </div>
+
+        <!-- 4. Mode Simulasi (Virtual Hardware) -->
+        <div class="flex items-center justify-between p-3 rounded-xl border" style="background:var(--surface-soft);border-color:var(--border)">
           <div>
-            <p class="font-bold t-main text-[11px]">Mode Simulasi (Virtual Hardware)</p>
-            <p class="text-[10px] t-muted mt-0.5">Uji coba AI &amp; dashboard tanpa perangkat fisik.</p>
+            <p class="font-bold t-main text-[11px] flex items-center gap-1.5">
+              <span>Mode Simulasi (Virtual Hardware)</span>
+              <span id="sim-active-badge" class="hidden text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-100 text-amber-800">ACTIVE</span>
+            </p>
+            <p class="text-[10px] t-muted mt-0.5">Uji coba AI Vision, aktuator, dan dashboard tanpa hardware fisik.</p>
           </div>
-          <input type="checkbox" id="esp32-sim-toggle" onchange="window.toggleEsp32Sim(this.checked)" class="w-4 h-4 cursor-pointer">
+          <input type="checkbox" id="esp32-sim-toggle" onchange="window.toggleDeviceSim(this.checked)" class="w-4 h-4 cursor-pointer">
         </div>
 
-        <!-- Telemetri Diagnostik -->
-        <div id="esp32-telemetry-box" class="p-3.5 rounded-xl border space-y-1.5 text-[11px]" style="background:var(--surface-soft);border-color:var(--border)">
-          <div class="flex justify-between">
-            <span class="t-muted">Status Perangkat:</span>
-            <span id="esp32-diag-status" class="font-bold font-mono">OFFLINE</span>
+        <!-- 5. Telemetri Diagnostik Real-Time -->
+        <div id="esp32-telemetry-box" class="p-3 rounded-xl border space-y-1.5 text-[11px]" style="background:var(--surface-soft);border-color:var(--border)">
+          <div class="flex justify-between items-center pb-1 border-b" style="border-color:var(--border)">
+            <span class="font-bold t-main text-[10px] uppercase">Telemetri Perangkat</span>
+            <span id="esp32-diag-status" class="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200">DISCONNECTED</span>
           </div>
-          <div class="flex justify-between">
-            <span class="t-muted">Device ID:</span>
-            <span id="esp32-diag-id" class="font-mono">—</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="t-muted">Wi-Fi RSSI / Sinyal:</span>
-            <span id="esp32-diag-rssi" class="font-mono">—</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="t-muted">Free Heap / Memori:</span>
-            <span id="esp32-diag-heap" class="font-mono">—</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="t-muted">Uptime:</span>
-            <span id="esp32-diag-uptime" class="font-mono">—</span>
+          <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+            <div class="flex justify-between">
+              <span class="t-muted">Perangkat:</span>
+              <span id="device-diag-type" class="font-bold font-mono">ESP32 (Wi-Fi)</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="t-muted">Device ID:</span>
+              <span id="esp32-diag-id" class="font-mono truncate max-w-[110px]">—</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="t-muted">Sinyal / RSSI:</span>
+              <span id="esp32-diag-rssi" class="font-mono">—</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="t-muted">Heap / Protokol:</span>
+              <span id="esp32-diag-heap" class="font-mono">—</span>
+            </div>
+            <div class="flex justify-between col-span-2">
+              <span class="t-muted">Aktivitas Terakhir:</span>
+              <span id="esp32-diag-uptime" class="font-mono truncate max-w-[200px]">—</span>
+            </div>
           </div>
         </div>
 
-        <button onclick="window.saveAndConnectEsp32()" class="btn-primary w-full py-3 text-xs flex items-center justify-center gap-2">
-          <i class="fas fa-plug"></i><span>SIMPAN &amp; HUBUNGKAN</span>
-        </button>
+        <!-- Action Controls -->
+        <div class="space-y-2 pt-1">
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btn-save-device-conn" onclick="window.saveAndConnectDevice()" class="btn-primary py-2.5 text-xs flex items-center justify-center gap-2">
+              <i class="fas fa-plug"></i><span>SIMPAN &amp; HUBUNGKAN</span>
+            </button>
+            <button id="btn-pulse-device" onclick="window.sendTestPulseDevice()" class="btn-ghost py-2.5 text-xs flex items-center justify-center gap-2 border">
+              <i class="fas fa-wave-square text-indigo-500"></i><span>TEST PULSE (AMAN)</span>
+            </button>
+          </div>
+          <div class="flex justify-between items-center pt-1">
+            <button type="button" onclick="window.disconnectCurrentDevice()" class="text-[11px] text-red-500 hover:underline flex items-center gap-1">
+              <i class="fas fa-power-off"></i><span>Putuskan Koneksi</span>
+            </button>
+            <button type="button" onclick="window.viewDeviceLogs()" class="text-[11px] t-muted hover:underline flex items-center gap-1">
+              <i class="fas fa-list-check"></i><span>Buka Log Perangkat</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1575,79 +1694,307 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   }
 
   /* ================================================================== */
-  /*  ESP32 WI-FI CLIENT ADAPTER                                        */
+  /*  UNIFIED DEVICE & CONNECTION MANAGER INTEGRATION (ESP32 & MICRO:BIT)*/
   /* ================================================================== */
-  window.esp32Client = new Esp32Client({
-    host: localStorage.getItem('esp32_host') || 'http://192.168.4.1',
-    simulationMode: localStorage.getItem('esp32_sim') === 'true'
+  window.deviceManager = new DeviceConnectionManager();
+  // Proxy backward-compatibility agar pemanggilan legacy tetap berjalan transparan
+  window.esp32Client = window.deviceManager.createLegacyEsp32ClientProxy();
+
+  // Sinkronisasi status terpadu ke antarmuka (Top bar pill, tombol, dan modal)
+  window.deviceManager.onStatusChange((ev) => {
+    updateDeviceUI(ev);
   });
 
-  // Sinkronisasi status klien ke antarmuka (pill & modal)
-  window.esp32Client.onStatusChange((ev) => {
-    updateEsp32UI(ev);
-  });
-
-  function updateEsp32UI(ev) {
+  function updateDeviceUI(ev) {
     const pill = $('status-esp32');
     const diagStatus = $('esp32-diag-status');
+    const diagDevType = $('device-diag-type');
     const diagId = $('esp32-diag-id');
     const diagRssi = $('esp32-diag-rssi');
     const diagHeap = $('esp32-diag-heap');
     const diagUptime = $('esp32-diag-uptime');
+    const simBadge = $('sim-active-badge');
+    const btnIcon = $('btn-device-icon');
+    const btnLabel = $('btn-device-label');
 
-    const st = ev.status;
+    const st = ev.status || (window.deviceManager ? window.deviceManager.getStatus().state : 'DISCONNECTED');
+    const cfg = window.deviceManager ? window.deviceManager.config : { deviceType: 'ESP32', connectionType: 'WIFI' };
+    const devShort = cfg.deviceType === 'MICROBIT' ? 'micro:bit' : 'ESP32';
+    const connShort = cfg.connectionType === 'BLE' ? 'BLE' : 'Wi-Fi';
+
     if (pill) {
-      if (st === 'READY') setPill(pill, 'blue', 'ESP32: READY');
-      else if (st === 'BUSY') setPill(pill, 'warn', 'ESP32: BUSY');
-      else if (st === 'SIMULATED') setPill(pill, 'on', 'ESP32: SIMULATED');
-      else if (st === 'CONNECTING') setPill(pill, 'warn', 'ESP32: CONNECTING...');
-      else setPill(pill, 'off', 'ESP32: OFFLINE');
+      if (st === 'CONNECTED' || st === 'READY') {
+        setPill(pill, 'blue', `${devShort} (${connShort}): ON`);
+      } else if (st === 'BUSY') {
+        setPill(pill, 'warn', `${devShort}: BUSY`);
+      } else if (st === 'SIMULATED') {
+        setPill(pill, 'on', `${devShort}: SIMULASI`);
+      } else if (st === 'CONNECTING') {
+        setPill(pill, 'warn', `${devShort}: CONNECTING...`);
+      } else {
+        setPill(pill, 'off', `${devShort}: OFFLINE`);
+      }
     }
 
-    if (diagStatus) diagStatus.innerText = st;
-    const telem = window.esp32Client.lastTelemetry;
+    if (btnIcon && btnLabel) {
+      if (cfg.connectionType === 'BLE') {
+        btnIcon.className = 'fab fa-bluetooth-b';
+      } else {
+        btnIcon.className = 'fas fa-wifi';
+      }
+      btnLabel.innerText = `${devShort.toUpperCase()} ${connShort.toUpperCase()}`;
+    }
+
+    if (diagStatus) {
+      diagStatus.innerText = st;
+      if (st === 'CONNECTED' || st === 'READY') {
+        diagStatus.className = 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+      } else if (st === 'SIMULATED') {
+        diagStatus.className = 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200';
+      } else if (st === 'BUSY' || st === 'CONNECTING') {
+        diagStatus.className = 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200';
+      } else {
+        diagStatus.className = 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200';
+      }
+    }
+
+    if (diagDevType) diagDevType.innerText = `${cfg.deviceType === 'MICROBIT' ? 'BBC micro:bit' : 'ESP32 DevKit V1'} (${connShort})`;
+    if (simBadge) simBadge.classList.toggle('hidden', !window.deviceManager.isSimulated());
+
+    const activeAdapter = window.deviceManager ? window.deviceManager.getActiveAdapter() : null;
+    const telem = activeAdapter ? activeAdapter.lastTelemetry : null;
     if (telem) {
       if (diagId) diagId.innerText = telem.deviceId || '—';
-      if (diagRssi) diagRssi.innerText = telem.wifiRssi ? `${telem.wifiRssi} dBm` : '—';
-      if (diagHeap) diagHeap.innerText = telem.freeHeap ? `${(telem.freeHeap / 1024).toFixed(1)} KB` : '—';
-      if (diagUptime) diagUptime.innerText = telem.uptimeSec ? `${telem.uptimeSec}s` : '—';
+      if (diagRssi) diagRssi.innerText = (telem.wifiRssi || telem.rssi) ? `${telem.wifiRssi || telem.rssi} dBm` : '—';
+      if (diagHeap) diagHeap.innerText = telem.freeHeap ? `${(telem.freeHeap / 1024).toFixed(1)} KB` : (telem.protocol || 'OK');
+      if (diagUptime) diagUptime.innerText = telem.uptimeSec ? `${telem.uptimeSec}s` : (telem.lastSeen ? new Date(telem.lastSeen).toLocaleTimeString('id-ID') : 'Aktif');
     }
   }
 
-  window.pingEsp32 = async () => {
-    const host = ($('esp32-host-input')?.value || '').trim();
-    if (host) window.esp32Client.configure({ host });
-    showToast(state.lang === 'id' ? "Memeriksa status ESP32..." : "Checking ESP32 status...");
-    const res = await window.esp32Client.checkHealth();
-    if (res.ok) {
-      showToast(state.lang === 'id' ? `ESP32 Terhubung! (${res.telemetry.deviceId})` : `ESP32 Connected! (${res.telemetry.deviceId})`);
-      logActivity("fas fa-wifi", "background:rgba(34,197,94,.15);color:#22c55e", "ESP32 Terhubung", `Host: ${window.esp32Client.host}`);
+  /* Admin Security Guard: Hanya admin terautentikasi yang dapat membuka & mengonfigurasi perangkat */
+  window.openDeviceManagerModal = () => {
+    const isAdmin = sessionStorage.getItem('rlab_admin_auth') === '1';
+    if (!isAdmin) {
+      showToast(state.lang === 'id' 
+        ? "Akses Dibatasi: Hanya Administrator yang dapat mengonfigurasi perangkat keras robotik." 
+        : "Access Restricted: Only Administrator can configure robotics hardware.");
+      const g = $('login-gate');
+      if (g) g.classList.remove('hide');
+      return;
+    }
+    syncDeviceModalFields();
+    window.openModal('esp32-modal');
+  };
+
+  /* Sinkronisasi nilai form modal dari state DeviceConnectionManager */
+  function syncDeviceModalFields() {
+    const cfg = window.deviceManager ? window.deviceManager.config : { deviceType: 'ESP32', connectionType: 'WIFI' };
+    
+    // Pilih radio device
+    const rDev = document.querySelector(`input[name="dev-type-select"][value="${cfg.deviceType}"]`);
+    if (rDev) rDev.checked = true;
+    window.onDeviceSelectChange(cfg.deviceType, false);
+
+    // Pilih radio connection
+    const rConn = document.querySelector(`input[name="conn-type-select"][value="${cfg.connectionType}"]`);
+    if (rConn) rConn.checked = true;
+    window.onConnSelectChange(cfg.connectionType, false);
+
+    // Nilai host / deviceName / sim
+    const hostInp = $('esp32-host-input');
+    if (hostInp && cfg.host) hostInp.value = cfg.host;
+
+    const bleInp = $('ble-name-input');
+    if (bleInp) bleInp.value = cfg.deviceName || (cfg.deviceType === 'MICROBIT' ? 'BBC micro:bit' : 'VERNOVA');
+
+    const simToggle = $('esp32-sim-toggle');
+    if (simToggle) simToggle.checked = Boolean(cfg.simulationMode);
+
+    // Evaluasi dukungan Web Bluetooth browser secara live
+    const banner = $('ble-compat-banner');
+    if (banner) {
+      const isBleOk = typeof navigator !== 'undefined' && Boolean(navigator.bluetooth);
+      if (isBleOk) {
+        banner.className = 'p-2.5 rounded-lg text-[10px] border border-emerald-200 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-800 flex items-center gap-2';
+        banner.innerHTML = '<i class="fas fa-check-circle text-emerald-600"></i><span><strong>Web Bluetooth Didukung:</strong> Siap memindai GATT UART (Chromium Desktop HTTPS / localhost).</span>';
+      } else {
+        banner.className = 'p-2.5 rounded-lg text-[10px] border border-amber-200 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-800 flex items-start gap-2';
+        banner.innerHTML = '<i class="fas fa-triangle-exclamation text-amber-600 mt-0.5"></i><div><strong>Web Bluetooth Tidak Didukung di Browser Ini:</strong> Browser saat ini (mis. Firefox, Safari, atau non-HTTPS) memblokir Bluetooth langsung. Gunakan <strong>Google Chrome</strong> / <strong>Microsoft Edge</strong> desktop. Anda dapat menggunakan <strong>Mode Simulasi</strong> untuk pengujian tanpa hardware.</div>';
+      }
+    }
+
+    // Refresh UI telemetri
+    updateDeviceUI({ status: window.deviceManager ? window.deviceManager.getStatus().state : 'OFFLINE' });
+  }
+
+  /* Handler saat user memilih tipe mikrokontroler (ESP32 vs micro:bit) */
+  window.onDeviceSelectChange = (devType, syncConn = true) => {
+    const isMbit = devType === 'MICROBIT';
+    const optEsp32 = $('opt-device-esp32');
+    const optMbit = $('opt-device-microbit');
+    const iconEsp32 = $('icon-check-esp32');
+    const iconMbit = $('icon-check-microbit');
+
+    if (optEsp32 && optMbit) {
+      if (isMbit) {
+        optMbit.className = 'device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20';
+        optEsp32.className = 'device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400';
+        if (iconMbit) iconMbit.className = 'fas fa-circle-check text-emerald-600 text-xs';
+        if (iconEsp32) iconEsp32.className = 'far fa-circle text-slate-400 text-xs';
+      } else {
+        optEsp32.className = 'device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
+        optMbit.className = 'device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400';
+        if (iconEsp32) iconEsp32.className = 'fas fa-circle-check text-blue-600 text-xs';
+        if (iconMbit) iconMbit.className = 'far fa-circle text-slate-400 text-xs';
+      }
+    }
+
+    // micro:bit tidak mendukung Wi-Fi onboard -> disable Wi-Fi radio & beralih ke BLE
+    const rWifi = document.querySelector('input[name="conn-type-select"][value="WIFI"]');
+    const optWifi = $('opt-conn-wifi');
+    const mbitNote = $('mbit-wifi-disabled-note');
+
+    if (isMbit) {
+      if (rWifi) rWifi.disabled = true;
+      if (optWifi) optWifi.classList.add('opacity-40', 'cursor-not-allowed');
+      if (mbitNote) mbitNote.classList.remove('hidden');
+      if (syncConn) {
+        const rBle = document.querySelector('input[name="conn-type-select"][value="BLE"]');
+        if (rBle) rBle.checked = true;
+        window.onConnSelectChange('BLE', false);
+      }
     } else {
-      showToast((state.lang === 'id' ? "ESP32 tidak merespons: " : "ESP32 unreachable: ") + (res.error || 'Offline'));
+      if (rWifi) rWifi.disabled = false;
+      if (optWifi) optWifi.classList.remove('opacity-40', 'cursor-not-allowed');
+      if (mbitNote) mbitNote.classList.add('hidden');
     }
   };
 
-  window.toggleEsp32Sim = (isSim) => {
-    window.esp32Client.setSimulation(isSim);
-    localStorage.setItem('esp32_sim', isSim ? 'true' : 'false');
-    showToast(isSim ? "Mode Simulasi Aktif (Virtual Hardware)" : "Mode Simulasi Nonaktif");
+  /* Handler saat user memilih metode koneksi (Wi-Fi vs BLE) */
+  window.onConnSelectChange = (connType) => {
+    const isBle = connType === 'BLE';
+    const optWifi = $('opt-conn-wifi');
+    const optBle = $('opt-conn-ble');
+    const iconWifi = $('icon-check-wifi');
+    const iconBle = $('icon-check-ble');
+    const secWifi = $('section-config-wifi');
+    const secBle = $('section-config-ble');
+
+    if (optWifi && optBle) {
+      if (isBle) {
+        optBle.className = 'conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/20';
+        optWifi.className = 'conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400';
+        if (iconBle) iconBle.className = 'fas fa-circle-check text-indigo-600 text-xs';
+        if (iconWifi) iconWifi.className = 'far fa-circle text-slate-400 text-xs';
+      } else {
+        optWifi.className = 'conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
+        optBle.className = 'conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400';
+        if (iconWifi) iconWifi.className = 'fas fa-circle-check text-blue-600 text-xs';
+        if (iconBle) iconBle.className = 'far fa-circle text-slate-400 text-xs';
+      }
+    }
+
+    if (secWifi && secBle) {
+      secWifi.classList.toggle('hidden', isBle);
+      secBle.classList.toggle('hidden', !isBle);
+    }
   };
 
-  window.saveAndConnectEsp32 = async () => {
+  /* Simpan konfigurasi & Hubungkan ke perangkat */
+  window.saveAndConnectDevice = async () => {
+    const devType = document.querySelector('input[name="dev-type-select"]:checked')?.value || 'ESP32';
+    const connType = document.querySelector('input[name="conn-type-select"]:checked')?.value || 'WIFI';
     const host = ($('esp32-host-input')?.value || '').trim();
+    const bleName = ($('ble-name-input')?.value || '').trim();
     const isSim = $('esp32-sim-toggle')?.checked;
-    window.esp32Client.configure({ host, simulationMode: isSim });
-    localStorage.setItem('esp32_host', host);
-    localStorage.setItem('esp32_sim', isSim ? 'true' : 'false');
-    await window.pingEsp32();
-    window.closeModal('esp32-modal');
+
+    showToast(state.lang === 'id' ? `Menyimpan & Menghubungkan ke ${devType} (${connType})...` : `Connecting to ${devType} (${connType})...`);
+
+    try {
+      await window.deviceManager.switchDevice(devType, connType, {
+        host: host || 'http://192.168.4.1',
+        deviceName: bleName,
+        simulationMode: isSim
+      });
+
+      const res = await window.deviceManager.connect();
+      if (res && res.ok) {
+        showToast(state.lang === 'id' 
+          ? `Sukses Terhubung ke ${devType}! (${res.simulated ? 'Mode Simulasi' : (res.telemetry?.deviceId || 'Online')})`
+          : `Connected to ${devType}!`);
+        logActivity("fas fa-plug-circle-check", "background:rgba(34,197,94,.15);color:#22c55e", "Device Connected", `${devType} (${connType}) - ${host || bleName || 'Ready'}`);
+        window.closeModal('esp32-modal');
+      } else {
+        showToast((state.lang === 'id' ? "Gagal tersambung: " : "Connection failed: ") + (res?.error || 'Offline'));
+      }
+    } catch (err) {
+      showToast("Error konfigurasi: " + err.message);
+    }
   };
+
+  /* Uji Ping / Handshake */
+  window.pingCurrentDevice = async () => {
+    showToast(state.lang === 'id' ? "Memeriksa status perangkat..." : "Testing device connection...");
+    const res = await window.deviceManager.connect();
+    if (res && res.ok) {
+      showToast(state.lang === 'id' 
+        ? `Perangkat Merespons! (${res.simulated ? 'Simulasi' : (res.telemetry?.deviceId || 'Online')})` 
+        : `Device Responded!`);
+      logActivity("fas fa-bolt", "background:rgba(34,197,94,.15);color:#22c55e", "Ping Success", `${window.deviceManager.config.deviceType} Online`);
+    } else {
+      showToast((state.lang === 'id' ? "Perangkat tidak merespons: " : "Device unreachable: ") + (res?.error || 'Offline'));
+    }
+  };
+
+  /* Safe Test Pulse: Uji aktuator tanpa siklus sortir penuh */
+  window.sendTestPulseDevice = async () => {
+    showToast(state.lang === 'id' ? "Mengirim Test Pulse (Aman)..." : "Sending safe test pulse...");
+    try {
+      const res = await window.deviceManager.sendTestPulse();
+      if (res && res.ok) {
+        showToast(state.lang === 'id' ? "Test pulse terkonfirmasi aman!" : "Test pulse acknowledged!");
+        logActivity("fas fa-wave-square", "background:rgba(99,102,241,.15);color:#6366f1", "Safe Test Pulse", `${window.deviceManager.config.deviceType} Pulse OK`);
+      } else {
+        showToast("Test pulse gagal: " + (res?.error || 'No response'));
+      }
+    } catch (err) {
+      showToast("Error test pulse: " + err.message);
+    }
+  };
+
+  /* Putuskan koneksi aktif */
+  window.disconnectCurrentDevice = async () => {
+    await window.deviceManager.disconnect();
+    showToast(state.lang === 'id' ? "Koneksi perangkat diputuskan." : "Device disconnected.");
+    logActivity("fas fa-power-off", "background:rgba(239,68,68,.15);color:#ef4444", "Device Disconnected", "Manual disconnect");
+  };
+
+  /* Toggle mode simulasi */
+  window.toggleDeviceSim = (isSim) => {
+    window.deviceManager.setSimulation(isSim);
+    showToast(isSim 
+      ? "Mode Simulasi Aktif (Hardware Virtual Siap Uji)" 
+      : "Mode Simulasi Nonaktif (Menggunakan Hardware Fisik)");
+  };
+
+  /* Navigasi langsung ke log aktivitas */
+  window.viewDeviceLogs = () => {
+    window.closeModal('esp32-modal');
+    window.showPage('page-dash');
+    const logSection = $('feed-container');
+    if (logSection) logSection.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  /* Backward-compatible helper aliases untuk script lama */
+  window.pingEsp32 = window.pingCurrentDevice;
+  window.toggleEsp32Sim = window.toggleDeviceSim;
+  window.saveAndConnectEsp32 = window.saveAndConnectDevice;
 
   window.changeSortingMode = async (newMode) => {
     showToast(`Mode diubah ke: ${newMode}`);
     logActivity("fas fa-right-left", "background:rgba(168,85,247,.15);color:#a855f7", "Mode Change Sent", `Mode: ${newMode}`);
     try {
-      await window.esp32Client.sendModeCommand(newMode);
+      await window.deviceManager.dispatchModeCommand(newMode);
     } catch (e) { console.warn(e); }
   };
 
@@ -1942,19 +2289,23 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         // Watchdog timeout 12s
         state.timeoutTimer = setTimeout(() => { executeTimeout(colorCode); }, 12000);
 
-        // Eksekusi via ESP32 Wi-Fi Client Adapter
-        window.esp32Client.sendSortingCommand({
+        // Eksekusi via Unified Device Connection Manager
+        window.deviceManager.dispatchSortingCommand({
           color: colorCode,
           mode: state.pendingMode,
           objectType: 'CYLINDER_CAP'
         }).then(res => {
           if (res && res.ok) {
             triggerSortAction(colorCode, res);
+          } else if (res && res.suppressed) {
+            state.isCoolingDown = false;
+            state.pendingDetection = null;
+            if (state.timeoutTimer) clearTimeout(state.timeoutTimer);
           } else {
-            executeTimeout(colorCode, (res && res.errorCode) || 'ERR_ESP32_REJECTED');
+            executeTimeout(colorCode, (res && res.errorCode) || 'ERR_DEVICE_REJECTED');
           }
         }).catch(err => {
-          console.warn('ESP32 dispatch error:', err);
+          console.warn('Device dispatch error:', err);
           executeTimeout(colorCode, 'ERR_COMM_EXCEPTION');
         });
       }
@@ -2222,7 +2573,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     state.isCoolingDown = false;
 
     const currentMode = $('mode-selector').value;
-    window.esp32Client.sendSortingCommand({ color: c, mode: currentMode }).catch(e => console.warn(e));
+    window.deviceManager.dispatchSortingCommand({ color: c, mode: currentMode, force: true }).catch(e => console.warn(e));
 
     state.sortingData[c]++;
     state.sortingData.total++;

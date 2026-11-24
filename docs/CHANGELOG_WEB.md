@@ -3,6 +3,34 @@ Semua perubahan penting pada kode program website dan perangkat lunak proyek **V
 
 Format mengikuti prinsip [Keep a Changelog](https://keepachangelog.com/id/1.0.0/) dan menganut [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-11-24
+
+### Ditambahkan (Added)
+- **Modular Multi-Device & Dual-Connection Manager (`assets/js/device-manager.js`):**
+  - Arsitektur adapter terpadu (`BaseDeviceAdapter`) untuk mikrokontroler robotik.
+  - Dukungan penuh untuk **ESP32 DevKit V1** (Wi-Fi HTTP REST & BLE GATT Nordic UART).
+  - Dukungan penuh untuk **BBC micro:bit** (MakeCode Bluetooth Low Energy UART Service).
+  - Registry dan konfigurasi dinamis (`DeviceConnectionManager`) tersimpan di `localStorage` (`vernova_device_config`).
+  - Mekanisme perlindungan *Debounce & Duplicate Suppression* (500ms cooldown) untuk mencegah pemicuan ganda dari deteksi AI Vision berkelanjutan.
+  - Deteksi dan banner status dukungan Web Bluetooth API (`navigator.bluetooth`) secara real-time.
+  - Mode Simulasi Virtual Hardware untuk seluruh adapter (ESP32 Wi-Fi, ESP32 BLE, micro:bit BLE) dengan telemetri virtual realistis.
+  - Proxy kompatibilitas mundur (`createLegacyEsp32ClientProxy()`) sehingga kode eksisting (`window.esp32Client`) tetap berfungsi tanpa modifikasi masif.
+- **Admin Device & Connection Manager Modal (`index.html`):**
+  - Antarmuka visual pemilihan mikrokontroler hardware dengan kartu interaktif.
+  - Pemilihan metode koneksi dinamis (Wi-Fi vs BLE) dengan penguncian otomatis Wi-Fi bila micro:bit dipilih.
+  - Keamanan akses: Dilindungi guard verifikasi Administrator (`sessionStorage.getItem('rlab_admin_auth') === '1'`).
+  - Tombol aksi: Simpan & Hubungkan, Test Ping/Handshake, Test Pulse (Aman), Putuskan Koneksi, dan Buka Log.
+  - Status pill & tombol navigasi topbar adaptif terhadap jenis perangkat aktif.
+- **Suite Pengujian Unit Komprehensif (`tests/device_manager.test.js`):**
+  - 9 pengujian otomatis mencakup: konstanta UUID, kontrak abstract adapter, simulasi ESP32 Wi-Fi REST, simulasi ESP32 BLE GATT, micro:bit UART string translation, dynamic switching, debounce suppression, dan legacy proxy compatibility.
+  - Total test suite proyek meningkat menjadi **62 passing (100% Lulus)**.
+- **Dokumentasi & Firmware Baru:**
+  - `docs/MULTI_DEVICE_ARCHITECTURE.md`: Spesifikasi teknis arsitektur multi-device dan dual-connection.
+  - `docs/MICROBIT_BLE_SETUP.md`: Panduan pemrograman MakeCode BBC micro:bit BLE UART.
+  - `firmware/esp32_vernova_sorting/esp32_vernova_ble.ino`: Firmware BLE GATT UART siap flash untuk ESP32.
+
+---
+
 ## [2.3.1] - 2026-11-15
 
 ### Diperbaiki (Fixed)
