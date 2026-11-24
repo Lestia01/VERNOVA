@@ -33,3 +33,11 @@ yarn-error.log*
 # Build artifacts
 dist/
 build/
+
+# Python & YOLO Studio temporary data
+__pycache__/
+*.py[cod]
+*$py.class
+yolo_studio/data/*
+!yolo_studio/data/.gitkeep
+

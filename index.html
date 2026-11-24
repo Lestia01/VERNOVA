@@ -34,6 +34,8 @@
 <script src="assets/js/esp32-client.js"></script>
 <script src="assets/js/device-manager.js"></script>
 <script src="assets/js/smart-data-assistant.js"></script>
+<script src="assets/js/yolo-client.js"></script>
+<script src="assets/js/yolo-studio-ui.js"></script>
 
   <style>
   /* ================= THEME TOKENS ================= */
@@ -684,6 +686,10 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         <button onclick="window.showPage('dash')" id="nav-dash" class="sidebar-btn active">
           <i class="fas fa-chart-line"></i><span data-i18n="nav.dash">Factory Dashboard</span>
         </button>
+        <button onclick="window.showPage('yolo')" id="nav-yolo" class="sidebar-btn">
+          <i class="fas fa-brain text-blue-500"></i><span>YOLO Studio</span>
+          <span class="text-[9px] px-1.5 py-0.5 rounded font-black bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200 ml-auto">AI</span>
+        </button>
         <button onclick="window.showPage('team')" id="nav-team" class="sidebar-btn">
           <i class="fas fa-users"></i><span data-i18n="nav.team">R-LAB Team</span>
         </button>
@@ -716,6 +722,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
           <div id="status-esp32" class="pill" onclick="window.openDeviceManagerModal()" title="Device Connection Status (Klik untuk Konfigurasi)" style="cursor:pointer">DEVICE: OFFLINE</div>
           <div id="status-fb" class="pill">FB: OFFLINE</div>
           <div id="status-tm" class="pill">AI: STANDBY</div>
+          <div id="status-engine-pill" class="pill on" title="Active AI Vision Engine">ENGINE: TM</div>
         </div>
 
         <div class="topbar-actions">
@@ -804,10 +811,42 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <div class="card p-4 sm:p-5 flex flex-col">
               <div class="flex items-center justify-between mb-3">
                 <h3 class="card-title"><i class="fas fa-camera-retro"></i><span data-i18n="vision.title">AI Vision</span></h3>
-                <span class="live-dot"></span>
+                <div id="yolo-backend-status-badge" onclick="window.yoloStudioUI.checkBackendStatus()" class="pill warn cursor-pointer" title="YOLO Backend Status (Klik untuk Cek Status)">
+                  <span class="live-dot !bg-amber-500"></span> YOLO: STANDBY
+                </div>
               </div>
 
-              <input type="text" id="tm-url-input" data-i18n-ph="vision.ph" placeholder="Teachable Machine Model URL..." value="https://teachablemachine.withgoogle.com/models/j0nanBWFa/" class="inp mb-2.5">
+              <!-- AI Engine Selector (Teachable Machine vs YOLO + OpenCV) -->
+              <div class="p-1 rounded-xl bg-slate-100 dark:bg-slate-800 flex gap-1 mb-3 border text-xs" style="border-color:var(--border)">
+                <button type="button" id="btn-engine-tm" onclick="window.yoloStudioUI.switchEngine('teachable_machine')" class="flex-1 py-1.5 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-all bg-blue-600 text-white shadow">
+                  <i class="fab fa-google text-[10px]"></i><span>Teachable Machine</span>
+                </button>
+                <button type="button" id="btn-engine-yolo" onclick="window.yoloStudioUI.switchEngine('yolo')" class="flex-1 py-1.5 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-all text-slate-600 dark:text-slate-300">
+                  <i class="fas fa-brain text-[10px]"></i><span>YOLO + OpenCV</span>
+                </button>
+              </div>
+
+              <!-- Engine A: Teachable Machine Config -->
+              <div id="section-tm-config" class="space-y-2 mb-2.5">
+                <input type="text" id="tm-url-input" data-i18n-ph="vision.ph" placeholder="Teachable Machine Model URL..." value="https://teachablemachine.withgoogle.com/models/j0nanBWFa/" class="inp">
+              </div>
+
+              <!-- Engine B: YOLO Config -->
+              <div id="section-yolo-config" class="hidden space-y-2 mb-2.5 p-3 rounded-xl border bg-slate-50 dark:bg-slate-900/50" style="border-color:var(--border)">
+                <div class="flex items-center justify-between">
+                  <label class="text-[11px] font-bold t-main">Model YOLO Aktif</label>
+                  <button type="button" onclick="window.showPage('yolo')" class="text-[10px] text-blue-600 hover:underline font-bold flex items-center gap-1">
+                    <i class="fas fa-arrow-up-right-from-square"></i>Studio
+                  </button>
+                </div>
+                <select id="yolo-active-model-select" onchange="window.yoloStudioUI.activateModel(this.value)" class="inp !py-1.5 text-xs">
+                  <option value="">(Belum ada model aktif - Gunakan built-in Vision)</option>
+                </select>
+                <div class="flex items-center justify-between text-[10px] t-muted">
+                  <span>Confidence: <strong id="lbl-yolo-conf">70%</strong></span>
+                  <input type="range" id="yolo-conf-slider" min="30" max="95" value="70" class="w-24 h-1.5 cursor-pointer" oninput="document.getElementById('lbl-yolo-conf').innerText=this.value+'%'">
+                </div>
+              </div>
 
             <div class="flex gap-2 mb-3">
               <button id="btn-start-tm" onclick="initTM()" class="btn-primary flex-1 py-3 sm:py-2.5 text-[12px] sm:text-[11px] min-h-[44px]">START AI</button>
@@ -894,6 +933,326 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             </div>
           </div>
         </section>
+
+        <!-- ============ PAGE: YOLO TRAINING STUDIO ============ -->
+        <section id="page-yolo" class="page">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="live-dot !bg-blue-500"></span>
+                <span class="text-[9px] font-black uppercase tracking-[.2em] text-blue-600">Computer Vision Studio</span>
+              </div>
+              <h1 class="text-xl md:text-2xl font-black tracking-tight t-main">VERNOVA YOLO Training Studio</h1>
+              <p class="text-xs t-muted mt-0.5">Platform pembuatan dataset, anotasi bounding box, training model YOLO, dan evaluasi sortir.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span id="yolo-current-project-badge" class="pill blue truncate max-w-[260px]">Proyek Aktif: Memuat...</span>
+            </div>
+          </div>
+
+          <!-- Studio Navigation Tabs -->
+          <div class="flex overflow-x-auto gap-2 border-b mb-5 text-xs pb-1" style="border-color:var(--border)">
+            <button type="button" onclick="window.yoloStudioUI.switchTab('projects')" class="yolo-tab-btn px-3 py-2 border-b-2 border-blue-600 text-blue-600 font-black whitespace-nowrap flex items-center gap-1.5" data-tab="projects">
+              <i class="fas fa-folder"></i><span>1. Projects</span>
+            </button>
+            <button type="button" onclick="window.yoloStudioUI.switchTab('dataset')" class="yolo-tab-btn px-3 py-2 text-slate-500 font-bold whitespace-nowrap flex items-center gap-1.5" data-tab="dataset">
+              <i class="fas fa-images"></i><span>2. Dataset</span>
+            </button>
+            <button type="button" onclick="window.yoloStudioUI.switchTab('annotation')" class="yolo-tab-btn px-3 py-2 text-slate-500 font-bold whitespace-nowrap flex items-center gap-1.5" data-tab="annotation">
+              <i class="fas fa-vector-square"></i><span>3. Annotation Studio</span>
+            </button>
+            <button type="button" onclick="window.yoloStudioUI.switchTab('validation')" class="yolo-tab-btn px-3 py-2 text-slate-500 font-bold whitespace-nowrap flex items-center gap-1.5" data-tab="validation">
+              <i class="fas fa-spell-check"></i><span>4. Validation</span>
+            </button>
+            <button type="button" onclick="window.yoloStudioUI.switchTab('training')" class="yolo-tab-btn px-3 py-2 text-slate-500 font-bold whitespace-nowrap flex items-center gap-1.5" data-tab="training">
+              <i class="fas fa-gear"></i><span>5. Training</span>
+            </button>
+            <button type="button" onclick="window.yoloStudioUI.switchTab('jobs')" class="yolo-tab-btn px-3 py-2 text-slate-500 font-bold whitespace-nowrap flex items-center gap-1.5" data-tab="jobs">
+              <i class="fas fa-clock-rotate-left"></i><span>6. Jobs</span>
+            </button>
+            <button type="button" onclick="window.yoloStudioUI.switchTab('models')" class="yolo-tab-btn px-3 py-2 text-slate-500 font-bold whitespace-nowrap flex items-center gap-1.5" data-tab="models">
+              <i class="fas fa-microchip"></i><span>7. Models</span>
+            </button>
+            <button type="button" onclick="window.yoloStudioUI.switchTab('testing')" class="yolo-tab-btn px-3 py-2 text-slate-500 font-bold whitespace-nowrap flex items-center gap-1.5" data-tab="testing">
+              <i class="fas fa-vial"></i><span>8. Testing</span>
+            </button>
+          </div>
+
+          <!-- SUBPAGE 1: PROJECTS -->
+          <div id="yolo-tab-projects" class="yolo-subpage space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-bold text-sm t-main">Daftar Proyek Training</h3>
+                <p class="text-[11px] t-muted">Pilih atau buat proyek deteksi objek baru.</p>
+              </div>
+              <button type="button" onclick="window.yoloStudioUI.openCreateProjectModal()" class="btn-primary px-3 py-2 text-xs flex items-center gap-1.5">
+                <i class="fas fa-plus"></i><span>Buat Proyek Baru</span>
+              </button>
+            </div>
+            <div id="yolo-project-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+
+          <!-- SUBPAGE 2: DATASET MANAGER -->
+          <div id="yolo-tab-dataset" class="yolo-subpage hidden space-y-4">
+            <div class="card p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 class="font-bold text-sm t-main">Manajemen Dataset &amp; Koleksi Gambar</h3>
+                <p id="yolo-dataset-count" class="text-[11px] t-muted mt-0.5">Memuat dataset...</p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <label class="btn-primary px-3 py-2 text-xs flex items-center gap-1.5 cursor-pointer">
+                  <i class="fas fa-upload"></i><span>Upload Gambar</span>
+                  <input type="file" multiple accept="image/*" class="sr-only" onchange="window.yoloStudioUI.handleUploadFiles(this.files)">
+                </label>
+                <label class="btn-ghost px-3 py-2 text-xs border flex items-center gap-1.5 cursor-pointer">
+                  <i class="fas fa-file-zipper text-amber-500"></i><span>Upload Dataset ZIP</span>
+                  <input type="file" accept=".zip" class="sr-only" onchange="window.yoloStudioUI.handleUploadFiles(this.files)">
+                </label>
+                <button type="button" onclick="window.yoloStudioUI.startCameraCapture()" class="btn-ghost px-3 py-2 text-xs border flex items-center gap-1.5">
+                  <i class="fas fa-camera text-blue-500"></i><span>Capture Kamera</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Camera Capture Preview Box -->
+            <div id="yolo-capture-box" class="card p-4 hidden space-y-3 bg-slate-50 dark:bg-slate-900 border-2 border-blue-500">
+              <div class="flex items-center justify-between">
+                <h4 class="font-bold text-xs t-main flex items-center gap-1.5">
+                  <i class="fas fa-video text-blue-500"></i><span>Live Camera Capture Dataset</span>
+                </h4>
+                <button type="button" onclick="window.yoloStudioUI.stopCameraCapture()" class="icon-btn text-xs"><i class="fas fa-xmark"></i></button>
+              </div>
+              <div class="flex flex-col sm:flex-row items-center gap-4">
+                <video id="yolo-capture-video" autoplay playsinline class="w-full sm:w-80 h-60 object-cover rounded-xl bg-black"></video>
+                <div class="space-y-2 text-xs">
+                  <p class="t-muted">Posisikan objek sortir (tutup silinder merah/kuning/biru) pada berbagai sudut, jarak, dan variasi pencahayaan.</p>
+                  <button type="button" onclick="window.yoloStudioUI.snapCamera()" class="btn-primary w-full py-2.5 flex items-center justify-center gap-2">
+                    <i class="fas fa-circle-dot"></i><span>Ambil Foto (Snap)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Gallery -->
+            <div id="yolo-dataset-gallery" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+
+          <!-- SUBPAGE 3: ANNOTATION STUDIO -->
+          <div id="yolo-tab-annotation" class="yolo-subpage hidden space-y-4">
+            <div class="card p-3 flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="window.yoloStudioUI.navigateAnnotation(-1)" class="icon-btn" title="Gambar Sebelumnya"><i class="fas fa-chevron-left text-xs"></i></button>
+                <span id="yolo-ann-filename" class="font-mono text-xs font-bold truncate max-w-[200px]">filename.jpg</span>
+                <button type="button" onclick="window.yoloStudioUI.navigateAnnotation(1)" class="icon-btn" title="Gambar Selanjutnya"><i class="fas fa-chevron-right text-xs"></i></button>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="window.yoloStudioUI.saveCurrentAnnotations()" class="btn-primary px-3 py-1.5 text-xs flex items-center gap-1.5">
+                  <i class="fas fa-floppy-disk"></i><span>Simpan Anotasi</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+              <!-- Canvas Area -->
+              <div class="card p-3 lg:col-span-3 flex flex-col items-center justify-center overflow-auto bg-slate-900 rounded-2xl min-h-[400px]">
+                <canvas id="yolo-annotation-canvas" class="cursor-crosshair rounded-lg shadow-lg"></canvas>
+                <p class="text-[10px] text-slate-400 mt-2"><i class="fas fa-mouse-pointer mr-1"></i>Klik &amp; drag pada gambar untuk menggambar bounding box objek.</p>
+              </div>
+
+              <!-- Sidebar Controls -->
+              <div class="card p-4 space-y-4">
+                <div>
+                  <label class="block font-bold text-xs t-main mb-2">Pilih Kelas Objek</label>
+                  <div id="yolo-class-selector-group" class="flex flex-wrap gap-1.5">
+                    <!-- Rendered dynamically -->
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block font-bold text-xs t-main mb-1.5">Daftar Bounding Box</label>
+                  <div id="yolo-bbox-list" class="space-y-1.5 max-h-[260px] overflow-y-auto pr-1">
+                    <!-- Rendered dynamically -->
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUBPAGE 4: DATASET VALIDATION -->
+          <div id="yolo-tab-validation" class="yolo-subpage hidden space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-bold text-sm t-main">Pemeriksaan Integritas Dataset</h3>
+                <p class="text-[11px] t-muted">Validasi sampel kelas, rasio split train/val/test, dan deteksi data leakage.</p>
+              </div>
+              <button type="button" onclick="window.yoloStudioUI.runValidation()" class="btn-ghost px-3 py-1.5 text-xs border flex items-center gap-1.5">
+                <i class="fas fa-arrows-rotate"></i><span>Validasi Ulang</span>
+              </button>
+            </div>
+            <div id="yolo-validation-results">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+
+          <!-- SUBPAGE 5: TRAINING ENGINE -->
+          <div id="yolo-tab-training" class="yolo-subpage hidden space-y-4">
+            <div class="card p-5 max-w-xl mx-auto space-y-4">
+              <div>
+                <h3 class="font-bold text-base t-main flex items-center gap-2">
+                  <i class="fas fa-brain text-blue-500"></i><span>Konfigurasi Training YOLO</span>
+                </h3>
+                <p class="text-xs t-muted mt-0.5">Tentukan hyperparameter model untuk proses training di backend.</p>
+              </div>
+
+              <div class="space-y-3 text-xs">
+                <div>
+                  <label class="block font-bold t-main mb-1">Model Pretrained</label>
+                  <select id="yolo-train-model" class="inp !py-2 text-xs">
+                    <option value="yolov8n.pt">YOLOv8 Nano (yolov8n.pt - Ringan &amp; Cepat)</option>
+                    <option value="yolo11n.pt">YOLOv11 Nano (yolo11n.pt - Versi Terbaru)</option>
+                    <option value="vernova_nano.pt">VERNOVA Custom Built-in (Fast Color Detector)</option>
+                  </select>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block font-bold t-main mb-1">Total Epoch</label>
+                    <input type="number" id="yolo-train-epochs" min="1" max="100" value="10" class="inp !py-2 text-xs">
+                  </div>
+                  <div>
+                    <label class="block font-bold t-main mb-1">Batch Size</label>
+                    <select id="yolo-train-batch" class="inp !py-2 text-xs">
+                      <option value="8">8</option>
+                      <option value="16" selected>16</option>
+                      <option value="32">32</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block font-bold t-main mb-1">Ukuran Gambar (ImgSz)</label>
+                    <select id="yolo-train-imgsz" class="inp !py-2 text-xs">
+                      <option value="320">320 x 320 px</option>
+                      <option value="640" selected>640 x 640 px</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block font-bold t-main mb-1">Perangkat Komputasi</label>
+                    <select id="yolo-train-device" class="inp !py-2 text-xs">
+                      <option value="auto">Auto (Deteksi GPU / CPU)</option>
+                      <option value="cpu">CPU Only</option>
+                      <option value="cuda">NVIDIA CUDA GPU</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="pt-2">
+                  <button type="button" onclick="window.yoloStudioUI.startTraining()" class="btn-primary w-full py-3 text-xs font-bold flex items-center justify-center gap-2">
+                    <i class="fas fa-play"></i><span>Mulai Training Model</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUBPAGE 6: TRAINING JOBS & MONITORING -->
+          <div id="yolo-tab-jobs" class="yolo-subpage hidden space-y-4">
+            <div id="yolo-active-job-view">
+              <p class="text-xs t-muted text-center py-6">Pilih atau mulai training job untuk memantau progres.</p>
+            </div>
+
+            <div class="space-y-2">
+              <h4 class="font-bold text-xs t-main uppercase tracking-wider">Riwayat Training Jobs</h4>
+              <div id="yolo-jobs-history" class="space-y-2">
+                <!-- Rendered dynamically -->
+              </div>
+            </div>
+          </div>
+
+          <!-- SUBPAGE 7: MODEL REGISTRY & EVALUATION -->
+          <div id="yolo-tab-models" class="yolo-subpage hidden space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-bold text-sm t-main">Model Registry &amp; Versi Aktif</h3>
+                <p class="text-[11px] t-muted">Kelola model hasil training, periksa metrik evaluasi (mAP50, Precision, Recall), dan aktifkan model untuk robot sortir.</p>
+              </div>
+              <button type="button" onclick="window.yoloStudioUI.loadModels()" class="btn-ghost px-3 py-1.5 text-xs border flex items-center gap-1.5">
+                <i class="fas fa-arrows-rotate"></i><span>Refresh Models</span>
+              </button>
+            </div>
+            <div id="yolo-models-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+
+          <!-- SUBPAGE 8: MODEL TESTING -->
+          <div id="yolo-tab-testing" class="yolo-subpage hidden space-y-4">
+            <div class="card p-4 space-y-4">
+              <div>
+                <h3 class="font-bold text-sm t-main">Uji Coba Inferensi Model YOLO</h3>
+                <p class="text-[11px] t-muted">Uji deteksi objek menggunakan gambar atau frame kamera sebelum digunakan pada robot sortir.</p>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-4 text-xs">
+                <label class="btn-primary px-3 py-2 text-xs flex items-center gap-1.5 cursor-pointer">
+                  <i class="fas fa-upload"></i><span>Pilih Gambar Uji</span>
+                  <input type="file" accept="image/*" class="sr-only" onchange="window.yoloStudioUI.testUploadedImage(this.files[0])">
+                </label>
+                <div class="flex items-center gap-2">
+                  <span class="t-muted">Confidence Threshold:</span>
+                  <input type="range" id="yolo-test-conf-slider" min="0.2" max="0.95" step="0.05" value="0.25" class="w-24 h-1.5 cursor-pointer" oninput="document.getElementById('lbl-test-conf').innerText=Math.round(this.value*100)+'%'">
+                  <span id="lbl-test-conf" class="font-mono font-bold">25%</span>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="border rounded-xl p-2 bg-slate-900 flex items-center justify-center min-h-[240px]">
+                  <img id="yolo-test-preview" src="" alt="Test Preview" class="max-h-72 object-contain rounded-lg">
+                </div>
+                <div id="yolo-test-results" class="space-y-2">
+                  <p class="text-xs t-muted italic">Unggah gambar di samping untuk melihat hasil deteksi bounding box dan confidence.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ MODAL: BUAT PROYEK YOLO BARU ============ -->
+        <div id="yolo-create-project-modal" class="modal">
+          <div class="modal-backdrop" onclick="window.closeModal('yolo-create-project-modal')"></div>
+          <div class="modal-panel max-w-md">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-black text-sm t-main flex items-center gap-2">
+                <i class="fas fa-folder-plus text-blue-500"></i><span>Buat Proyek YOLO Baru</span>
+              </h3>
+              <button onclick="window.closeModal('yolo-create-project-modal')" class="icon-btn"><i class="fas fa-xmark text-xs"></i></button>
+            </div>
+            <div class="space-y-3 text-xs">
+              <div>
+                <label class="block font-bold mb-1 t-main">Nama Proyek</label>
+                <input type="text" id="yolo-new-proj-name" placeholder="Misal: Sortir Tutup Botol 2026" class="inp">
+              </div>
+              <div>
+                <label class="block font-bold mb-1 t-main">Deskripsi</label>
+                <textarea id="yolo-new-proj-desc" placeholder="Tujuan proyek deteksi objek..." class="inp h-16"></textarea>
+              </div>
+              <div>
+                <label class="block font-bold mb-1 t-main">Nama Kelas Objek (Pisahkan dengan koma)</label>
+                <input type="text" id="yolo-new-proj-classes" value="merah, kuning, biru" class="inp font-mono text-[11px]">
+                <p class="text-[10px] t-muted mt-1">Kelas kanonik standar VERNOVA: merah, kuning, biru.</p>
+              </div>
+              <div class="flex justify-end gap-2 pt-2">
+                <button type="button" onclick="window.closeModal('yolo-create-project-modal')" class="btn-ghost px-4 py-2 text-xs">Batal</button>
+                <button type="button" onclick="window.yoloStudioUI.saveNewProject()" class="btn-primary px-4 py-2 text-xs">Simpan Proyek</button>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <!-- ============ PAGE: TEAM ============ -->
         <section id="page-team" class="page">
@@ -1004,6 +1363,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         <button onclick="window.showPage('dash')" id="bnav-dash" class="tab-btn active">
           <i class="fas fa-chart-line"></i><span data-i18n="nav.dashShort">Dashboard</span>
         </button>
+        <button onclick="window.showPage('yolo')" id="bnav-yolo" class="tab-btn">
+          <i class="fas fa-brain text-blue-500"></i><span>YOLO</span>
+        </button>
         <button onclick="window.showPage('team')" id="bnav-team" class="tab-btn">
           <i class="fas fa-users"></i><span data-i18n="nav.teamShort">Team</span>
         </button>
@@ -1045,6 +1407,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     <nav class="flex flex-col gap-1.5" aria-label="Menu utama">
       <button onclick="window.showPage('dash')" id="mnav-dash" class="mnav-btn active">
         <i class="fas fa-chart-line"></i><span data-i18n="nav.dash">Factory Dashboard</span>
+      </button>
+      <button onclick="window.showPage('yolo')" id="mnav-yolo" class="mnav-btn">
+        <i class="fas fa-brain text-blue-500"></i><span>YOLO Training Studio</span>
       </button>
       <button onclick="window.showPage('team')" id="mnav-team" class="mnav-btn">
         <i class="fas fa-users"></i><span data-i18n="nav.team">R-LAB Team</span>
@@ -1585,16 +1950,23 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   /*  NAVIGATION                                                         */
   /* ------------------------------------------------------------------ */
   window.showPage = (id) => {
+    const cleanId = (id || '').replace(/^page-/, '');
     document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.sidebar-btn, .tab-btn, .mnav-btn').forEach(el => el.classList.remove('active'));
-    const page = $('page-' + id);
+    const page = $('page-' + cleanId);
     if (page) { void page.offsetWidth; page.classList.add('active'); }
-    ['nav-' + id, 'bnav-' + id, 'mnav-' + id].forEach(x => { const el = $(x); if (el) el.classList.add('active'); });
+    ['nav-' + cleanId, 'bnav-' + cleanId, 'mnav-' + cleanId].forEach(x => { const el = $(x); if (el) el.classList.add('active'); });
     const sc = document.querySelector('.scroll-area');
     if (sc) sc.scrollTo({ top: 0, behavior: 'smooth' });
     window.toggleDrawer(false);
-    if (id === 'dash') {
+    if (cleanId === 'dash') {
       requestAnimationFrame(() => setTimeout(() => { try { refreshChartSize(); } catch (e) {} }, 80));
+    }
+    if (cleanId === 'yolo') {
+      if (window.yoloStudioUI) {
+        window.yoloStudioUI.loadProjects();
+        window.yoloStudioUI.loadModels();
+      }
     }
   };
 
@@ -2237,9 +2609,94 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         if (fp) setPill(fp, 'on', `FPS: ${state.fps}`);
       }
 
-      if (!state.isPaused && model) { await tmPredict(); }
+      if (!state.isPaused) {
+        if (window.yoloStudioUI && window.yoloStudioUI.client && window.yoloStudioUI.client.isYoloActive()) {
+          await yoloPredictLoop();
+        } else if (model) {
+          await tmPredict();
+        }
+      }
     } catch (e) { console.warn('tmLoop:', e); }
     window.requestAnimationFrame(() => tmLoop(gen));
+  }
+
+  let lastYoloInferTime = 0;
+  async function yoloPredictLoop() {
+    if (!webcam || !webcam.canvas) return;
+    const now = performance.now();
+    // Pembatasan laju inferensi (~6 FPS / 160ms) agar tidak membebani backend
+    if (now - lastYoloInferTime < 160) return;
+    lastYoloInferTime = now;
+
+    try {
+      const b64 = webcam.canvas.toDataURL('image/jpeg', 0.8);
+      const confSlider = $('yolo-conf-slider');
+      const minConf = confSlider ? (parseFloat(confSlider.value) / 100) : 0.70;
+      const modelSelect = $('yolo-active-model-select');
+      const modelId = modelSelect ? modelSelect.value : null;
+
+      const res = await window.yoloStudioUI.client.predictFrame(b64, {
+        confThreshold: minConf,
+        modelId
+      });
+
+      if (res && res.detections) {
+        if (labelContainer) {
+          if (res.detections.length) {
+            labelContainer.innerHTML = res.detections.map(d => `
+              <div class="flex justify-between text-xs py-0.5 font-bold">
+                <span class="text-blue-600">${d.class_name}</span>
+                <span style="color:var(--brand)">${Math.round(d.confidence * 100)}% (${res.inference_time_ms}ms)</span>
+              </div>
+            `).join('');
+          } else {
+            labelContainer.innerHTML = '<p class="text-[10px] t-muted italic">YOLO: Tidak ada objek terdeteksi</p>';
+          }
+        }
+
+        const topDet = window.yoloStudioUI.client.extractTopColorDetection(res, minConf);
+        if (topDet) {
+          const time = new Date().toLocaleTimeString('id-ID');
+          state.lastDetection = { name: topDet.class_name, prob: topDet.confidence, time, engine: 'yolo' };
+          const ld = $('last-detect');
+          if (ld) {
+            ld.innerHTML = `<span style="color:var(--brand)">${topDet.class_name}</span><span class="t-muted"> · ${(topDet.confidence * 100).toFixed(1)}% · ${time} (YOLO)</span>`;
+          }
+
+          if (!state.isCoolingDown && !state.pendingDetection) {
+            state.isCoolingDown = true;
+            state.pendingDetection = topDet.color;
+            state.pendingStartTime = Date.now();
+            state.pendingMode = $('mode-selector').value;
+
+            state.timeoutTimer = setTimeout(() => { executeTimeout(topDet.color); }, 12000);
+
+            window.deviceManager.dispatchSortingCommand({
+              color: topDet.color,
+              mode: state.pendingMode,
+              objectType: 'CYLINDER_CAP',
+              engine: 'yolo',
+              confidence: topDet.confidence
+            }).then(sortRes => {
+              if (sortRes && sortRes.ok) {
+                triggerSortAction(topDet.color, sortRes);
+              } else if (sortRes && sortRes.suppressed) {
+                state.isCoolingDown = false;
+                state.pendingDetection = null;
+                if (state.timeoutTimer) clearTimeout(state.timeoutTimer);
+              } else {
+                executeTimeout(topDet.color, (sortRes && sortRes.errorCode) || 'ERR_DEVICE_REJECTED');
+              }
+            }).catch(err => {
+              console.warn('YOLO robot dispatch error:', err);
+              executeTimeout(topDet.color, 'ERR_COMM_EXCEPTION');
+            });
+          }
+        }
+      }
+    } catch (e) {
+      // Graceful fallback
+    }
   }
 
   async function tmPredict() {
@@ -4539,6 +4996,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     try { renderFeed(); } catch (e) {}
     try { ensureTMLibs().catch(() => {}); } catch (e) {}
     try { pickRaiVoice(); if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = pickRaiVoice; } catch (e) {}
+    try { if (window.yoloStudioUI) window.yoloStudioUI.init(); } catch (e) { console.warn('YOLO Studio UI init error:', e); }
 
     setTimeout(() => showToast(state.lang === 'id' ? 'Sistem siap · R-LAB' : 'System ready · R-LAB'), 700);
   })();

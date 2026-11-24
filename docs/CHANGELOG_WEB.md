@@ -3,6 +3,36 @@ Semua perubahan penting pada kode program website dan perangkat lunak proyek **V
 
 Format mengikuti prinsip [Keep a Changelog](https://keepachangelog.com/id/1.0.0/) dan menganut [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-11-24
+
+### Ditambahkan (Added)
+- **Sistem Dual AI Engine & YOLO + OpenCV Training Studio:**
+  - Kemampuan memilih AI Engine secara independen antara **Google Teachable Machine** (klasifikasi berbasis TensorFlow.js) dan **YOLO + OpenCV** (deteksi objek dengan bounding box terarah) langsung dari kartu AI Vision di Factory Dashboard.
+  - Pengalihan AI Engine tidak mengubah atau mereset konfigurasi koneksi perangkat hardware (ESP32 / micro:bit).
+  - Status pill AI Engine dan YOLO Backend terpadu pada header navigasi web (`ENGINE: TM/YOLO` dan `YOLO: ONLINE/OFFLINE`).
+- **Studio Pelatihan Web YOLO Terintegrasi (`#page-yolo`):**
+  - **Manajemen Proyek:** Buat, edit, hapus, dan pilih proyek dataset sortir dengan pengaturan kelas kustom (`merah`, `kuning`, `biru`).
+  - **Dataset Manager:** Pengumpulan gambar melalui drag-and-drop file, upload ZIP dengan perlindungan Zip-Slip (`os.path.commonpath`), capture snapshot langsung dari kamera USB/webcam, dan pelabelan otomatis.
+  - **Annotation Studio:** Editor interaktif bounding box berbasis HTML5 Canvas untuk menggambar, menggeser, memperbesar/memperkecil, dan menghapus anotasi dengan ekspor ke format YOLO `.txt` dan JSON.
+  - **Validasi Dataset & Leakage Check:** Pemeriksaan distribusi kelas, validasi dataset siap latih, split otomatis (Train/Val/Test), dan pencegahan kebocoran data (data leakage) dengan hashing MD5.
+  - **Training Engine Asinkron:** Worker thread background berbasis FastAPI/Python yang menjalankan training tanpa membekukan server, metrik riil per epoch (Loss, Precision, Recall, mAP50, mAP50-95), pemantauan CPU/RAM, dan pembatalan aman (*graceful cancel*).
+  - **Model Registry & Evaluasi:** Versioning model, perbandingan metrik performa antar model, penandaan model aktif produksi, dan penghapusan model usang.
+  - **Testing Model Real-Time:** Pengujian model langsung pada citra statis dan live camera streaming dengan visualisasi bounding box, confidence score, dan threshold slider.
+- **Backend Modular Python (`yolo_studio/`):**
+  - `config.py`, `project_manager.py`, `dataset_manager.py`, `training_engine.py`, `model_registry.py`, `inference_engine.py`, dan `server.py` (FastAPI).
+  - Skrip eksekusi satu klik: `start_yolo_studio.bat`, `start_yolo_studio.ps1`, dan `requirements.txt`.
+- **Integrasi Sorting Robot Langsung:**
+  - Deteksi warna teratas (`merah`, `kuning`, `biru`) dari YOLO diintegrasikan langsung ke `window.deviceManager.dispatchSortingCommand({ color, mode })` untuk menggerakkan lengan robot / servo sortir melalui ESP32 Wi-Fi/BLE atau micro:bit BLE.
+- **Suite Pengujian Otomatis:**
+  - Pengujian Backend Python (`tests/test_yolo_studio.py`): 5/5 lulus (Project CRUD, Dataset & ZIP security, Validation, Training & Model Registry, Inference Engine).
+  - Pengujian Frontend Node.js (`tests/yolo_client.test.js`): 4/4 lulus (AI Engine constants, Backend URL sanitization, Engine switching, Canonical detection mapping).
+  - Total pengujian proyek: **67 pengujian Node.js + 5 pengujian Python = 72 pengujian 100% Lulus**.
+- **Dokumentasi Lengkap:**
+  - `docs/YOLO_TRAINING_STUDIO_AUDIT_PLAN.md`: Audit komprehensif arsitektur eksisting dan rencana implementasi 8 fase.
+  - `docs/YOLO_TRAINING_STUDIO_GUIDE.md`: Panduan lengkap alur kerja studio, arsitektur, dan cara pengoperasian backend.
+
+---
+
 ## [2.4.0] - 2026-11-24
 
 ### Ditambahkan (Added)
