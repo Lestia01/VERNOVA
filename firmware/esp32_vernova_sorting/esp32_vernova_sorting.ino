@@ -145,12 +145,49 @@ void handlePostSort() {
   String resp = "{";
   resp += "\"ok\":true,";
   resp += "\"commandId\":\"" + commandId + "\",";
+  resp += "\"transactionId\":\"" + commandId + "\",";
   resp += "\"color\":\"" + color + "\",";
   resp += "\"mode\":\"" + currentMode + "\",";
   resp += "\"status\":\"COMMAND_RECEIVED\",";
   resp += "\"executionStatus\":\"confirmed_esp32_wifi\",";
+  resp += "\"sensorVerified\":false,";
   resp += "\"deviceId\":\"" + deviceId + "\",";
   resp += "\"message\":\"Perintah sortir " + color + " selesai dieksekusi.\"";
+  resp += "}";
+
+  server.send(200, "application/json", resp);
+}
+
+// ---------- Endpoint: POST /api/mechanism (Phase 2 Two-Stage Confirmation) ----------
+void handlePostMechanism() {
+  setCorsHeaders();
+  String body = server.arg("plain");
+  String txId = "TX_MECH_" + String(millis());
+
+  int idIdx = body.indexOf("\"transactionId\":");
+  if (idIdx != -1) {
+    int startQ = body.indexOf("\"", idIdx + 16);
+    int endQ = body.indexOf("\"", startQ + 1);
+    if (startQ != -1 && endQ != -1) {
+      txId = body.substring(startQ + 1, endQ);
+    }
+  }
+
+  if (body.indexOf("Arm") != -1 || body.indexOf("arm") != -1) {
+    currentMode = "Arm";
+  } else {
+    currentMode = "Servo";
+  }
+
+  String resp = "{";
+  resp += "\"ok\":true,";
+  resp += "\"transactionId\":\"" + txId + "\",";
+  resp += "\"mechanism\":\"" + String(currentMode == "Arm" ? "arm" : "servo") + "\",";
+  resp += "\"mode\":\"" + currentMode + "\",";
+  resp += "\"status\":\"READY\",";
+  resp += "\"ready\":true,";
+  resp += "\"deviceId\":\"" + deviceId + "\",";
+  resp += "\"message\":\"Mekanisme " + currentMode + " dikonfirmasi siap.\"";
   resp += "}";
 
   server.send(200, "application/json", resp);
@@ -165,7 +202,7 @@ void handlePostMode() {
   } else {
     currentMode = "Servo";
   }
-  server.send(200, "application/json", "{\"ok\":true,\"mode\":\"" + currentMode + "\"}");
+  server.send(200, "application/json", "{\"ok\":true,\"mode\":\"" + currentMode + "\",\"status\":\"READY\",\"ready\":true}");
 }
 
 // ---------- Endpoint: POST /api/stop ----------
@@ -216,12 +253,14 @@ void setup() {
   // 3. Daftarkan Endpoint Web Server REST API
   server.on("/api/status", HTTP_GET, handleGetStatus);
   server.on("/api/sort", HTTP_POST, handlePostSort);
+  server.on("/api/mechanism", HTTP_POST, handlePostMechanism);
   server.on("/api/mode", HTTP_POST, handlePostMode);
   server.on("/api/stop", HTTP_POST, handlePostStop);
 
   // OPTIONS handler untuk preflight CORS request browser
   server.on("/api/status", HTTP_OPTIONS, handleOptions);
   server.on("/api/sort", HTTP_OPTIONS, handleOptions);
+  server.on("/api/mechanism", HTTP_OPTIONS, handleOptions);
   server.on("/api/mode", HTTP_OPTIONS, handleOptions);
   server.on("/api/stop", HTTP_OPTIONS, handleOptions);
 

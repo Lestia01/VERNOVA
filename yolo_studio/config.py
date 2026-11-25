@@ -20,6 +20,12 @@ ALLOWED_ARCHIVE_EXTS = {".zip"}
 # Default sorting classes for VERNOVA
 DEFAULT_CLASSES = ["merah", "kuning", "biru"]
 
+# Phase 2: 6 Mechanism-aware sorting classes
+MECHANISM_CLASSES = [
+    "merah_arm", "kuning_arm", "biru_arm",
+    "merah_servo", "kuning_servo", "biru_servo"
+]
+
 # Server settings
 HOST = "127.0.0.1"
 PORT = 8000

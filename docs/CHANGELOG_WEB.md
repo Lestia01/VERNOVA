@@ -3,6 +3,36 @@ Semua perubahan penting pada kode program website dan perangkat lunak proyek **V
 
 Format mengikuti prinsip [Keep a Changelog](https://keepachangelog.com/id/1.0.0/) dan menganut [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-11-25
+
+### Ditambahkan (Added)
+- **Phase 2: Mechanism-Aware AI Detection & Two-Stage Sorting Protocol:**
+  - Skema 6 kelas mekanisme-warna (`merah_arm`, `kuning_arm`, `biru_arm`, `merah_servo`, `kuning_servo`, `biru_servo`) untuk mengidentifikasi target aktuator dan warna sekaligus.
+  - Kompatibilitas model 3-kelas legacy (`merah`, `kuning`, `biru`) melalui dialog modal **Mapping Kelas AI** dengan fallback penolakan aman (`MECHANISM_UNDEFINED`) jika mekanisme tidak ditentukan.
+  - **Two-Stage Execution Cycle:** Stage 1 `setMechanism(arm|servo)` -> tunggu ACK `READY` -> Stage 2 `sortObject(color, mechanism)` -> tunggu ACK `COMPLETED` -> Stage 3 Verifikasi Sensor.
+- **Operating Modes (Auto / Manual Switching):**
+  - Saklar mode operasional `AUTO` (AI-Driven) dan `MANUAL` (Operator Station) dengan *Mutual Exclusion*: saat mode Manual aktif, deteksi AI tetap ditampilkan secara visual di canvas namun aktuasi motor otomatis diblokir (`MANUAL_MODE_ACTIVE`).
+  - Stasiun manual sortir terintegrasi di dashboard (`#manual-sorting-panel`) dengan target perangkat, jenis koneksi, mekanisme, warna, tombol Kirim Perintah, dan tombol Emergency Stop.
+- **Transaction State Machine & Strict Status Categories:**
+  - Status transaksi: `IDLE`, `COMMAND_QUEUED`, `AWAITING_MECHANISM_ACK`, `AWAITING_CLASS_ACK`, `SORTING`, `VERIFYING`, `COMPLETED`, `FAILED`, `TIMEOUT`, `CANCELLED`, `UNKNOWN`.
+  - Kategori status standar industri: `detected`, `command_sent`, `command_acknowledged`, `sorting`, `completed_unverified`, `verified`, `failed`, `timeout`, `unknown` (pemisahan tegas antara prediksi AI, penerimaan perintah, dan verifikasi fisik sensor).
+  - Kartu Live Telemetry Transaksi (`#live-transaction-card`) menampilkan progres 3 tahap, UUID transaksi, waktu eksekusi, dan badge status real-time.
+- **Pembaruan Firmware & Protokol:**
+  - `esp32_vernova_sorting.ino`: Endpoint `POST /api/mechanism` untuk validasi Stage 1 dan parameter `sensorVerified` pada respon `/api/sort`.
+  - `esp32_vernova_ble.ino`: Payload JSON `{"cmd":"mechanism"}` dan notifikasi status `READY`.
+  - `MICROBIT_BLE_SETUP.md`: Spesifikasi string balasan MakeCode UART (`ACK:ARM:READY`, `DONE:KUNING`, `VERIFIED:MERAH`).
+  - Non-Maximum Suppression (NMS) dengan IoU > 0.5 di backend YOLO Studio Python untuk mencegah deteksi duplikat pada conveyor.
+- **Buku Panduan Resmi Komprehensif (Official Guidebooks):**
+  - `docs/VERNOVA_USER_GUIDE.md`: Buku panduan pengguna (8 bab lengkap).
+  - `docs/VERNOVA_COMMUNICATION_PROTOCOL.md`: Spesifikasi protokol komunikasi ESP32 (Wi-Fi REST & BLE GATT) dan BBC micro:bit (BLE UART).
+  - `docs/VERNOVA_DEVELOPER_GUIDE.md`: Arsitektur sistem, modul breakdown, alur Mermaid, dan panduan pengujian.
+  - `docs/VERNOVA_TROUBLESHOOTING.md`: Tabel panduan diagnosa 14 masalah umum, penyebab, dan solusinya.
+- **Suite Pengujian Otomatis:**
+  - `tests/phase2_sorting_protocol.test.js`: 8 unit test baru untuk 6-class resolution, 2-stage cycle, mutual exclusion, dan status categories.
+  - Total pengujian: **75 pengujian Node.js + 5 pengujian Python = 80 pengujian 100% Lulus**.
+
+---
+
 ## [2.5.0] - 2026-11-24
 
 ### Ditambahkan (Added)

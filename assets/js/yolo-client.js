@@ -305,7 +305,8 @@
 
     /**
      * Standardizer output deteksi kanonik yang dipahami oleh robot sortir.
-     * Mengubah format deteksi YOLO menjadi input perintah pemilahan warna.
+     * Mengubah format deteksi YOLO menjadi input pemilahan warna dan mekanisme.
+     * Menggunakan aturan seleksi objek konsisten: confidence tertinggi, lalu luas bounding box terbesar.
      */
     extractTopColorDetection(predictionResult, minConfidence = 0.65) {
       if (!predictionResult || !predictionResult.detections || !predictionResult.detections.length) {
@@ -316,7 +317,16 @@
       const validDetections = predictionResult.detections.filter(d => d.confidence >= minConfidence);
       if (!validDetections.length) return null;
 
-      // Ambil deteksi dengan confidence tertinggi
+      // Seleksi objek konsisten: urutkan confidence menurun, lalu luas bounding box menurun jika seimbang
+      validDetections.sort((a, b) => {
+        if (Math.abs(b.confidence - a.confidence) > 0.001) {
+          return b.confidence - a.confidence;
+        }
+        const areaA = (a.bbox && a.bbox.length === 4) ? Math.abs((a.bbox[2] - a.bbox[0]) * (a.bbox[3] - a.bbox[1])) : 0;
+        const areaB = (b.bbox && b.bbox.length === 4) ? Math.abs((b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1])) : 0;
+        return areaB - areaA;
+      });
+
       const top = validDetections[0];
       const cLower = String(top.class_name || '').toLowerCase().trim();
 
@@ -327,8 +337,13 @@
 
       if (!colorCode) return null;
 
+      let mechanism = null;
+      if (cLower.includes('arm')) mechanism = 'arm';
+      else if (cLower.includes('servo')) mechanism = 'servo';
+
       return {
         color: colorCode,
+        mechanism: mechanism,
         confidence: top.confidence,
         bbox: top.bbox,
         class_name: top.class_name,

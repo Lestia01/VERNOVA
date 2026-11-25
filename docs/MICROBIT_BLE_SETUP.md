@@ -64,37 +64,47 @@ bluetooth.onBluetoothDisconnected(function () {
     basic.showIcon(IconNames.No)
 })
 
-// Menerima perintah string dari Website VERNOVA
+// Menerima perintah string dari Website VERNOVA (Mendukung 2-Stage Sequence)
 bluetooth.onUartDataReceived(serial.delimiters(Delimiters.NewLine), function () {
     perintah = bluetooth.uartReadUntil(serial.delimiters(Delimiters.NewLine))
-    perintah = perintah.trim()
+    perintah = perintah.trim().toLowerCase()
 
-    if (perintah == "kuning") {
+    // 1. Tahap Konfirmasi Kesiapan Mekanisme
+    if (perintah == "arm" || perintah == "mech:arm") {
+        modeAktif = "arm"
+        basic.showString("A")
+        bluetooth.uartWriteString("ACK:ARM:READY\n")
+    } else if (perintah == "servo" || perintah == "mech:servo") {
+        modeAktif = "servo"
+        basic.showString("S")
+        bluetooth.uartWriteString("ACK:SERVO:READY\n")
+    } 
+    // 2. Tahap Eksekusi Sortir Kelas Warna
+    else if (perintah == "kuning" || perintah == "sort:kuning") {
         basic.showString("K")
         pins.servoWritePin(AnalogPin.P1, 40)
         basic.pause(300)
-    } else if (perintah == "biru") {
+        bluetooth.uartWriteString("DONE:KUNING\n")
+    } else if (perintah == "biru" || perintah == "sort:biru") {
         basic.showString("B")
         pins.servoWritePin(AnalogPin.P1, 90)
         basic.pause(300)
-    } else if (perintah == "merah") {
+        bluetooth.uartWriteString("DONE:BIRU\n")
+    } else if (perintah == "merah" || perintah == "sort:merah") {
         basic.showString("M")
         pins.servoWritePin(AnalogPin.P1, 140)
         basic.pause(300)
-    } else if (perintah == "arm") {
-        modeAktif = "arm"
-        basic.showString("A")
-    } else if (perintah == "servo") {
-        modeAktif = "servo"
-        basic.showString("S")
+        bluetooth.uartWriteString("DONE:MERAH\n")
     } else if (perintah == "stop") {
         pins.servoWritePin(AnalogPin.P1, 90)
         pins.servoWritePin(AnalogPin.P2, 20)
         basic.showIcon(IconNames.Square)
+        bluetooth.uartWriteString("ACK:STOPPED\n")
     } else if (perintah == "test") {
         basic.showIcon(IconNames.Target)
         basic.pause(200)
         basic.clearScreen()
+        bluetooth.uartWriteString("ACK:TEST:OK\n")
     }
 })
 ```

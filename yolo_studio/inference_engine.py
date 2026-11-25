@@ -117,8 +117,35 @@ class InferenceEngine:
                             }
                         })
 
-        # Sort detections by confidence descending
-        detections.sort(key=lambda d: d["confidence"], reverse=True)
+        # Non-Maximum Suppression (NMS) untuk mencegah duplikasi bounding box pada objek fisik yang sama
+        if len(detections) > 1:
+            filtered = []
+            detections.sort(key=lambda d: d["confidence"], reverse=True)
+            for d in detections:
+                box = d["bbox"]
+                keep = True
+                for f in filtered:
+                    fbox = f["bbox"]
+                    xx1 = max(box["x1"], fbox["x1"])
+                    yy1 = max(box["y1"], fbox["y1"])
+                    xx2 = min(box["x2"], fbox["x2"])
+                    yy2 = min(box["y2"], fbox["y2"])
+                    w_inter = max(0, xx2 - xx1)
+                    h_inter = max(0, yy2 - yy1)
+                    inter = w_inter * h_inter
+                    area1 = (box["x2"] - box["x1"]) * (box["y2"] - box["y1"])
+                    area2 = (fbox["x2"] - fbox["x1"]) * (fbox["y2"] - fbox["y1"])
+                    union = area1 + area2 - inter
+                    iou = inter / union if union > 0 else 0
+                    if iou > 0.5:
+                        keep = False
+                        break
+                if keep:
+                    filtered.append(d)
+            detections = filtered
+        else:
+            detections.sort(key=lambda d: d["confidence"], reverse=True)
+
         return detections
 
     def predict(self, image_data: Any, model_id: Optional[str] = None, conf_threshold: float = 0.25) -> Dict[str, Any]:

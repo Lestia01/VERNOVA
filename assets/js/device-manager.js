@@ -22,6 +22,13 @@
     root.DEVICE_TYPES = mod.DEVICE_TYPES;
     root.CONNECTION_TYPES = mod.CONNECTION_TYPES;
     root.CONNECTION_STATES = mod.CONNECTION_STATES;
+    root.OPERATING_MODES = mod.OPERATING_MODES;
+    root.TRANSACTION_STATES = mod.TRANSACTION_STATES;
+    root.STATUS_CATEGORIES = mod.STATUS_CATEGORIES;
+    root.MECHANISM_TYPES = mod.MECHANISM_TYPES;
+    root.CANONICAL_CLASSES = mod.CANONICAL_CLASSES;
+    root.CLASS_REGISTRY = mod.CLASS_REGISTRY;
+    root.resolveClassAndMechanism = mod.resolveClassAndMechanism;
   }
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
@@ -47,6 +54,141 @@
     SIMULATED: 'SIMULATED',
     ERROR: 'ERROR'
   };
+
+  const OPERATING_MODES = {
+    AUTO: 'AUTO',
+    MANUAL: 'MANUAL'
+  };
+
+  const TRANSACTION_STATES = {
+    IDLE: 'IDLE',
+    COMMAND_QUEUED: 'COMMAND_QUEUED',
+    AWAITING_MECHANISM_ACK: 'AWAITING_MECHANISM_ACK',
+    AWAITING_CLASS_ACK: 'AWAITING_CLASS_ACK',
+    SORTING: 'SORTING',
+    VERIFYING: 'VERIFYING',
+    COMPLETED: 'COMPLETED',
+    FAILED: 'FAILED',
+    TIMEOUT: 'TIMEOUT',
+    CANCELLED: 'CANCELLED',
+    UNKNOWN: 'UNKNOWN'
+  };
+
+  const STATUS_CATEGORIES = {
+    DETECTED: 'detected',
+    COMMAND_SENT: 'command_sent',
+    COMMAND_ACKNOWLEDGED: 'command_acknowledged',
+    SORTING: 'sorting',
+    COMPLETED_UNVERIFIED: 'completed_unverified',
+    VERIFIED: 'verified',
+    FAILED: 'failed',
+    TIMEOUT: 'timeout',
+    UNKNOWN: 'unknown'
+  };
+
+  const MECHANISM_TYPES = {
+    SERVO: 'servo',
+    ARM: 'arm'
+  };
+
+  const CANONICAL_CLASSES = {
+    MERAH_ARM: 'merah_arm',
+    KUNING_ARM: 'kuning_arm',
+    BIRU_ARM: 'biru_arm',
+    MERAH_SERVO: 'merah_servo',
+    KUNING_SERVO: 'kuning_servo',
+    BIRU_SERVO: 'biru_servo',
+    MERAH: 'merah',
+    KUNING: 'kuning',
+    BIRU: 'biru'
+  };
+
+  const CLASS_REGISTRY = {
+    'merah_arm':    { color: 'merah',  mechanism: 'arm',   label: 'Merah (Lengan Robot)' },
+    'kuning_arm':   { color: 'kuning', mechanism: 'arm',   label: 'Kuning (Lengan Robot)' },
+    'biru_arm':     { color: 'biru',   mechanism: 'arm',   label: 'Biru (Lengan Robot)' },
+    'merah_servo':  { color: 'merah',  mechanism: 'servo', label: 'Merah (Servo Flap)' },
+    'kuning_servo': { color: 'kuning', mechanism: 'servo', label: 'Kuning (Servo Flap)' },
+    'biru_servo':   { color: 'biru',   mechanism: 'servo', label: 'Biru (Servo Flap)' }
+  };
+
+  /**
+   * Pemetaan kelas deteksi AI ke warna dan mekanisme fisik secara deterministik.
+   * Mendukung kelas berorientasi mekanisme (6 kelas) dan kelas warisan (3 warna).
+   */
+  function resolveClassAndMechanism(rawClass, legacyMap = {}, fallbackMechanism = null) {
+    const raw = String(rawClass || '').toLowerCase().trim();
+    if (!raw) {
+      return { valid: false, error: 'EMPTY_CLASS', reason: 'Nama kelas tidak boleh kosong.' };
+    }
+
+    // 1. Pencocokan langsung pada registry 6 kelas kanonik
+    if (CLASS_REGISTRY[raw]) {
+      const entry = CLASS_REGISTRY[raw];
+      return {
+        valid: true,
+        class: raw,
+        color: entry.color,
+        mechanism: entry.mechanism,
+        label: entry.label,
+        isMechanismAware: true
+      };
+    }
+
+    // 2. Ekstraksi warna
+    let color = null;
+    if (raw.includes('kuning') || raw.includes('yellow')) color = 'kuning';
+    else if (raw.includes('biru') || raw.includes('blue')) color = 'biru';
+    else if (raw.includes('merah') || raw.includes('red')) color = 'merah';
+
+    if (!color) {
+      return { valid: false, error: 'INVALID_COLOR', reason: `Warna tidak dikenali dari kelas "${rawClass}".` };
+    }
+
+    // 3. Ekstraksi mekanisme jika tertulis pada string (misal: "red_arm", "biru-servo")
+    let embeddedMech = null;
+    if (raw.includes('arm')) embeddedMech = 'arm';
+    else if (raw.includes('servo')) embeddedMech = 'servo';
+
+    if (embeddedMech) {
+      const canonicalKey = `${color}_${embeddedMech}`;
+      return {
+        valid: true,
+        class: canonicalKey,
+        color: color,
+        mechanism: embeddedMech,
+        label: CLASS_REGISTRY[canonicalKey]?.label || `${color} (${embeddedMech})`,
+        isMechanismAware: true
+      };
+    }
+
+    // 4. Model warisan (3 warna): utamakan mekanisme eksplisit yang dipassing perintah (misal manual), atau konfigurasi pemetaan
+    const explicitMech = (fallbackMechanism && (String(fallbackMechanism).toLowerCase().trim() === 'arm' || String(fallbackMechanism).toLowerCase().trim() === 'servo'))
+      ? String(fallbackMechanism).toLowerCase().trim()
+      : null;
+    const mappedMech = (legacyMap && legacyMap[color]) ? String(legacyMap[color]).toLowerCase().trim() : null;
+    const finalMech = explicitMech || mappedMech;
+
+    if (!finalMech || (finalMech !== 'arm' && finalMech !== 'servo')) {
+      return {
+        valid: false,
+        error: 'MECHANISM_UNDEFINED',
+        color: color,
+        reason: `Mekanisme untuk kelas warisan "${color}" belum dikonfigurasi. Silakan tentukan mekanisme target.`
+      };
+    }
+
+    const canonicalKey = `${color}_${finalMech}`;
+    return {
+      valid: true,
+      class: canonicalKey,
+      color: color,
+      mechanism: finalMech,
+      label: CLASS_REGISTRY[canonicalKey]?.label || `${color} (${finalMech})`,
+      isMechanismAware: false,
+      mappedFromLegacy: true
+    };
+  }
 
   // Nordic UART Service (Standar BLE untuk micro:bit MakeCode & ESP32 BLE UART)
   const NORDIC_UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -141,6 +283,8 @@
     async disconnect() { throw new Error('disconnect() harus diimplementasikan oleh subclass adapter.'); }
     async sendSortingCommand(params) { throw new Error('sendSortingCommand() harus diimplementasikan.'); }
     async sendModeCommand(mode) { throw new Error('sendModeCommand() harus diimplementasikan.'); }
+    async setMechanism(mechanism, options = {}) { throw new Error('setMechanism() harus diimplementasikan.'); }
+    async sortObject(color, mechanism, options = {}) { throw new Error('sortObject() harus diimplementasikan.'); }
     async sendEmergencyStop() { throw new Error('sendEmergencyStop() harus diimplementasikan.'); }
     async sendTestPulse() { throw new Error('sendTestPulse() harus diimplementasikan.'); }
 
@@ -339,6 +483,67 @@
       } catch (err) {
         return { ok: false, mode, error: err.message };
       }
+    }
+
+    async setMechanism(mechanism, options = {}) {
+      const mode = String(mechanism || '').toLowerCase().trim() === 'arm' ? 'Arm' : 'Servo';
+      const txId = options.transactionId || `TX_WIFI_MECH_${Date.now()}`;
+      if (this.simulationMode) {
+        await new Promise(r => setTimeout(r, 60));
+        const res = {
+          ok: true,
+          simulated: true,
+          transactionId: txId,
+          mechanism: mode.toLowerCase(),
+          mode: mode,
+          status: 'READY',
+          ready: true,
+          message: `Mekanisme ${mode} siap (Simulasi Wi-Fi).`
+        };
+        this.lastAck = res;
+        return res;
+      }
+
+      try {
+        let resp;
+        try {
+          resp = await this._fetchWithTimeout(`${this.host}/api/mechanism`, {
+            method: 'POST',
+            body: JSON.stringify({ mechanism: mode.toLowerCase(), mode, transactionId: txId, timestamp: new Date().toISOString() })
+          });
+        } catch (e) {
+          resp = await this._fetchWithTimeout(`${this.host}/api/mode`, {
+            method: 'POST',
+            body: JSON.stringify({ mode, transactionId: txId, timestamp: new Date().toISOString() })
+          });
+        }
+
+        if (!resp.ok) throw new Error(`ESP32 menolak mekanisme ${mode} (HTTP ${resp.status})`);
+        const json = await resp.json();
+        const res = {
+          ok: true,
+          transactionId: json.transactionId || txId,
+          mechanism: mode.toLowerCase(),
+          mode: mode,
+          status: json.status || 'READY',
+          ready: json.ready !== false,
+          rawResponse: json
+        };
+        this.lastAck = res;
+        return res;
+      } catch (err) {
+        this.lastError = err.message;
+        throw new Error(`Gagal konfirmasi kesiapan mekanisme ${mode} via Wi-Fi: ${err.message}`);
+      }
+    }
+
+    async sortObject(color, mechanism, options = {}) {
+      return await this.sendSortingCommand({
+        color,
+        mode: String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo',
+        commandId: options.transactionId,
+        ...options
+      });
     }
 
     async sendEmergencyStop() {
@@ -585,6 +790,52 @@
       }
     }
 
+    async setMechanism(mechanism, options = {}) {
+      const mode = String(mechanism || '').toLowerCase().trim() === 'arm' ? 'Arm' : 'Servo';
+      const txId = options.transactionId || `TX_BLE_MECH_${Date.now()}`;
+      if (this.simulationMode) {
+        await new Promise(r => setTimeout(r, 60));
+        const res = {
+          ok: true,
+          simulated: true,
+          transactionId: txId,
+          mechanism: mode.toLowerCase(),
+          mode: mode,
+          status: 'READY',
+          ready: true,
+          message: `Mekanisme ${mode} siap (Simulasi BLE).`
+        };
+        this.lastAck = res;
+        return res;
+      }
+      try {
+        const payload = JSON.stringify({ cmd: 'mechanism', mechanism: mode.toLowerCase(), mode, txId });
+        await this._writeBLE(payload);
+        const res = {
+          ok: true,
+          transactionId: txId,
+          mechanism: mode.toLowerCase(),
+          mode: mode,
+          status: 'READY',
+          ready: true
+        };
+        this.lastAck = res;
+        return res;
+      } catch (err) {
+        this.lastError = err.message;
+        throw new Error(`Gagal konfirmasi mekanisme ${mode} via BLE: ${err.message}`);
+      }
+    }
+
+    async sortObject(color, mechanism, options = {}) {
+      return await this.sendSortingCommand({
+        color,
+        mode: String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo',
+        commandId: options.transactionId,
+        ...options
+      });
+    }
+
     async sendEmergencyStop() {
       if (this.simulationMode) return { ok: true, simulated: true, status: 'STOPPED' };
       try {
@@ -819,6 +1070,49 @@
       }
     }
 
+    async setMechanism(mechanism, options = {}) {
+      const mode = String(mechanism || '').toLowerCase().trim() === 'arm' ? 'arm' : 'servo';
+      const txId = options.transactionId || `TX_MBIT_MECH_${Date.now()}`;
+      if (this.simulationMode) {
+        await new Promise(r => setTimeout(r, 60));
+        const res = {
+          ok: true,
+          simulated: true,
+          transactionId: txId,
+          mechanism: mode,
+          status: 'READY',
+          ready: true,
+          message: `Mekanisme ${mode} micro:bit siap (Simulasi).`
+        };
+        this.lastAck = res;
+        return res;
+      }
+      try {
+        await this._writeMakeCodeCommand(mode);
+        const res = {
+          ok: true,
+          transactionId: txId,
+          mechanism: mode,
+          status: 'READY',
+          ready: true
+        };
+        this.lastAck = res;
+        return res;
+      } catch (err) {
+        this.lastError = err.message;
+        throw new Error(`Gagal konfirmasi mekanisme ${mode} via micro:bit: ${err.message}`);
+      }
+    }
+
+    async sortObject(color, mechanism, options = {}) {
+      return await this.sendSortingCommand({
+        color,
+        mode: String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo',
+        commandId: options.transactionId,
+        ...options
+      });
+    }
+
     async sendEmergencyStop() {
       if (this.simulationMode) return { ok: true, simulated: true, status: 'STOPPED' };
       try {
@@ -852,6 +1146,21 @@
       this._managerListeners = new Set();
       this._adapterUnsubscribe = null;
 
+      // Mode Pengoperasian: AUTO (otomatis via AI) vs MANUAL (pilihan dashboard)
+      this.operatingMode = this.config.operatingMode || OPERATING_MODES.AUTO;
+
+      // Konfigurasi Pemetaan Mekanisme untuk Model Warisan (3 warna)
+      this.legacyMechanismMap = Object.assign({
+        merah: 'servo',
+        kuning: 'servo',
+        biru: 'arm'
+      }, this.config.legacyMechanismMap || {});
+
+      // Status Transaksi & Pelacakan Siklus Sortir
+      this.currentTransaction = null;
+      this.transactionHistory = [];
+      this.maxHistorySize = 50;
+
       // Debounce & Duplicate Suppression Guard
       this.lastDispatchedCommand = null;
       this.lastDispatchedTime = 0;
@@ -868,7 +1177,13 @@
         host: 'http://192.168.4.1',
         deviceName: '',
         simulationMode: false,
-        autoReconnect: false
+        autoReconnect: false,
+        operatingMode: OPERATING_MODES.AUTO,
+        legacyMechanismMap: {
+          merah: 'servo',
+          kuning: 'servo',
+          biru: 'arm'
+        }
       };
 
       if (typeof localStorage !== 'undefined') {
@@ -905,6 +1220,78 @@
         }
       }
       return this;
+    }
+
+    getOperatingMode() {
+      return this.operatingMode;
+    }
+
+    setOperatingMode(mode) {
+      const m = String(mode || '').toUpperCase().trim();
+      if (!OPERATING_MODES[m]) {
+        throw new Error(`Operating mode tidak valid: "${mode}". Harus AUTO atau MANUAL.`);
+      }
+      if (this.currentTransaction && this.isTransactionActive()) {
+        return {
+          ok: false,
+          busy: true,
+          error: 'TRANSACTION_IN_PROGRESS',
+          message: `Tidak dapat berpindah ke mode ${m} saat transaksi "${this.currentTransaction.id}" sedang berlangsung.`
+        };
+      }
+      this.operatingMode = m;
+      this.saveConfig({ operatingMode: m });
+      this._notifyManagerListeners({
+        type: 'operating_mode_changed',
+        operatingMode: this.operatingMode,
+        timestamp: new Date().toISOString()
+      });
+      return { ok: true, operatingMode: this.operatingMode };
+    }
+
+    getLegacyMechanismMap() {
+      return Object.assign({}, this.legacyMechanismMap);
+    }
+
+    setLegacyMechanismMap(map = {}) {
+      this.legacyMechanismMap = Object.assign({}, this.legacyMechanismMap, map);
+      this.saveConfig({ legacyMechanismMap: this.legacyMechanismMap });
+      return this.legacyMechanismMap;
+    }
+
+    isTransactionActive() {
+      if (!this.currentTransaction) return false;
+      const activeStates = [
+        TRANSACTION_STATES.COMMAND_QUEUED,
+        TRANSACTION_STATES.AWAITING_MECHANISM_ACK,
+        TRANSACTION_STATES.AWAITING_CLASS_ACK,
+        TRANSACTION_STATES.SORTING,
+        TRANSACTION_STATES.VERIFYING
+      ];
+      const isStateActive = activeStates.includes(this.currentTransaction.state);
+      const isTimedOut = (Date.now() - (this.currentTransaction.startTime || 0)) > 10000;
+      if (isTimedOut && isStateActive) {
+        this.currentTransaction.state = TRANSACTION_STATES.TIMEOUT;
+        this.currentTransaction.statusCategory = STATUS_CATEGORIES.TIMEOUT;
+        return false;
+      }
+      return isStateActive;
+    }
+
+    getCurrentTransaction() {
+      return this.currentTransaction ? Object.assign({}, this.currentTransaction) : null;
+    }
+
+    getTransactionHistory() {
+      return this.transactionHistory.slice();
+    }
+
+    _recordTransaction(tx) {
+      this.currentTransaction = tx;
+      this.transactionHistory.unshift(Object.assign({}, tx));
+      if (this.transactionHistory.length > this.maxHistorySize) {
+        this.transactionHistory.pop();
+      }
     }
 
     _initAdapter() {
@@ -1032,40 +1419,205 @@
     }
 
     /**
+     * Eksekusi transaksi pemilahan 2-tahap (Two-Stage Sorting Cycle):
+     * Tahap 1: Pengiriman & konfirmasi kesiapan mekanisme (Arm / Servo).
+     * Tahap 2: Pengiriman perintah pemilahan kelas warna setelah mekanisme siap.
+     * Tahap 3: Verifikasi keberhasilan fisik sensor.
+     */
+    async executeTwoStageSort(targetColor, targetMechanism, options = {}) {
+      if (!this.activeAdapter) this._initAdapter();
+
+      const txId = options.transactionId || `TX_${this.operatingMode}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const startTime = Date.now();
+      const normColor = String(targetColor || '').toLowerCase().trim();
+      const normMech = String(targetMechanism || '').toLowerCase().trim();
+
+      const tx = {
+        id: txId,
+        transactionId: txId,
+        source: options.source || this.operatingMode,
+        aiEngine: options.aiEngine || (this.operatingMode === OPERATING_MODES.MANUAL ? 'manual' : 'yolo'),
+        modelId: options.modelId || null,
+        detectedClass: options.detectedClass || `${normColor}_${normMech}`,
+        color: normColor,
+        mechanism: normMech,
+        confidence: Number(options.confidence) || 1.0,
+        state: TRANSACTION_STATES.COMMAND_QUEUED,
+        statusCategory: STATUS_CATEGORIES.COMMAND_SENT,
+        deviceType: this.config.deviceType,
+        connectionType: this.config.connectionType,
+        startTime,
+        durationMs: 0,
+        mechanismAck: null,
+        classAck: null,
+        verified: false,
+        error: null
+      };
+
+      this._recordTransaction(tx);
+      this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
+
+      try {
+        // TAHAP 1: Set & Konfirmasi Kesiapan Mekanisme (AwaitingMechanismAck)
+        tx.state = TRANSACTION_STATES.AWAITING_MECHANISM_ACK;
+        this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
+
+        const mechResp = await this.activeAdapter.setMechanism(normMech, {
+          transactionId: txId,
+          timeoutMs: options.mechanismTimeoutMs || 5000
+        });
+
+        if (!mechResp || !mechResp.ok) {
+          throw new Error(mechResp?.error || `Perangkat menolak kesiapan mekanisme ${normMech}`);
+        }
+
+        tx.mechanismAck = mechResp;
+        tx.state = TRANSACTION_STATES.AWAITING_CLASS_ACK;
+        tx.statusCategory = STATUS_CATEGORIES.COMMAND_ACKNOWLEDGED;
+        this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
+
+        // TAHAP 2: Eksekusi Perintah Pemilahan Kelas Warna (Sorting)
+        tx.state = TRANSACTION_STATES.SORTING;
+        tx.statusCategory = STATUS_CATEGORIES.SORTING;
+        this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
+
+        const sortResp = await this.activeAdapter.sortObject(normColor, normMech, {
+          transactionId: txId,
+          timeoutMs: options.sortTimeoutMs || 8000,
+          ...options
+        });
+
+        if (!sortResp || !sortResp.ok) {
+          throw new Error(sortResp?.error || `Perangkat gagal mengeksekusi sortir ${normColor}`);
+        }
+
+        tx.classAck = sortResp;
+        tx.durationMs = Date.now() - startTime;
+
+        // TAHAP 3: Verifikasi Sensor Fisik
+        const hasSensorVerification = Boolean(sortResp.sensorVerified || sortResp.verified);
+        if (hasSensorVerification) {
+          tx.state = TRANSACTION_STATES.VERIFYING;
+          tx.verified = true;
+          tx.statusCategory = STATUS_CATEGORIES.VERIFIED;
+        } else {
+          tx.verified = false;
+          tx.statusCategory = STATUS_CATEGORIES.COMPLETED_UNVERIFIED;
+        }
+
+        tx.state = TRANSACTION_STATES.COMPLETED;
+        this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
+
+        return {
+          ok: true,
+          transaction: tx,
+          commandId: txId,
+          color: normColor,
+          mode: normMech,
+          status: tx.state,
+          statusCategory: tx.statusCategory,
+          verified: tx.verified,
+          durationMs: tx.durationMs,
+          rawResponse: sortResp
+        };
+      } catch (err) {
+        tx.durationMs = Date.now() - startTime;
+        const isTimeout = /timeout/i.test(err.message);
+        tx.state = isTimeout ? TRANSACTION_STATES.TIMEOUT : TRANSACTION_STATES.FAILED;
+        tx.statusCategory = isTimeout ? STATUS_CATEGORIES.TIMEOUT : STATUS_CATEGORIES.FAILED;
+        tx.error = err.message;
+        this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
+
+        return {
+          ok: false,
+          transaction: tx,
+          commandId: txId,
+          color: normColor,
+          mode: normMech,
+          status: tx.state,
+          statusCategory: tx.statusCategory,
+          verified: false,
+          durationMs: tx.durationMs,
+          error: err.message
+        };
+      }
+    }
+
+    /**
      * Dispatcher terpadu untuk perintah pemilahan warna dari AI Vision / input manual.
-     * Dilengkapi fitur debounce duplicate suppression (500ms cooldown) untuk mencegah
-     * pengiriman berulang kali saat objek yang sama berada di area kamera.
+     * Menggunakan siklus 2-tahap, isolasi mode Auto/Manual, dan pencegahan duplikasi.
      */
     async dispatchSortingCommand(params = {}) {
       if (!this.activeAdapter) this._initAdapter();
 
-      const rawColor = String(params.color || params || '').toLowerCase().trim();
-      let color = null;
-      if (rawColor.includes('kuning') || rawColor.includes('yellow')) color = 'kuning';
-      else if (rawColor.includes('biru') || rawColor.includes('blue')) color = 'biru';
-      else if (rawColor.includes('merah') || rawColor.includes('red')) color = 'merah';
-
-      if (!color) {
-        throw new Error(`Warna tidak dikenali: "${params.color}". Warna wajib salah satu dari: kuning, biru, merah.`);
-      }
-
-      // Periksa cooldown debounce jika bukan paksaan (force)
-      const now = Date.now();
-      if (!params.force && this.lastDispatchedCommand === color && (now - this.lastDispatchedTime) < this.debounceMs) {
+      // 1. Validasi Mode Pengoperasian: Dalam mode MANUAL, cegah trigger otomatis AI
+      if (this.operatingMode === OPERATING_MODES.MANUAL && !params.manualOverride) {
         return {
           ok: false,
           suppressed: true,
-          color,
-          reason: `Perintah duplikat untuk "${color}" diabaikan dalam rentang debounce ${this.debounceMs}ms.`
+          reason: 'MANUAL_MODE_ACTIVE',
+          message: 'Mode MANUAL aktif. Perintah sortir otomatis dari kamera diabaikan demi keselamatan.'
         };
       }
 
-      this.lastDispatchedCommand = color;
+      // 2. Cegah pengiriman transaksi baru jika transaksi sebelumnya masih aktif
+      if (this.isTransactionActive()) {
+        return {
+          ok: false,
+          busy: true,
+          reason: 'DEVICE_BUSY',
+          activeTransactionId: this.currentTransaction ? this.currentTransaction.id : null,
+          message: 'Perangkat sedang memproses transaksi sortir sebelumnya.'
+        };
+      }
+
+      // 3. Resolusi kelas dan mekanisme
+      const rawInput = params.class_name || params.color || params;
+      const resolved = resolveClassAndMechanism(
+        rawInput,
+        this.legacyMechanismMap,
+        params.mode || params.mechanism || (this.config.defaultMechanism || 'servo')
+      );
+
+      if (!resolved.valid) {
+        return {
+          ok: false,
+          error: resolved.error,
+          reason: resolved.reason
+        };
+      }
+
+      // 4. Periksa cooldown debounce jika bukan paksaan (force / manualOverride)
+      const now = Date.now();
+      const dedupeKey = resolved.class;
+      if (!params.force && !params.manualOverride && this.lastDispatchedCommand === dedupeKey && (now - this.lastDispatchedTime) < this.debounceMs) {
+        return {
+          ok: false,
+          suppressed: true,
+          class: dedupeKey,
+          reason: `Perintah duplikat untuk "${dedupeKey}" diabaikan dalam rentang debounce ${this.debounceMs}ms.`
+        };
+      }
+
+      this.lastDispatchedCommand = dedupeKey;
       this.lastDispatchedTime = now;
 
-      return await this.activeAdapter.sendSortingCommand({
+      // 5. Jalankan eksekusi 2-tahap
+      return await this.executeTwoStageSort(resolved.color, resolved.mechanism, {
         ...params,
-        color
+        detectedClass: resolved.class,
+        isMechanismAware: resolved.isMechanismAware
+      });
+    }
+
+    /**
+     * Pengiriman perintah pemilahan manual dari antarmuka dashboard.
+     */
+    async sendManualSort(params = {}) {
+      return await this.dispatchSortingCommand({
+        ...params,
+        manualOverride: true,
+        source: OPERATING_MODES.MANUAL
       });
     }
 
@@ -1130,6 +1682,13 @@
     DEVICE_TYPES,
     CONNECTION_TYPES,
     CONNECTION_STATES,
+    OPERATING_MODES,
+    TRANSACTION_STATES,
+    STATUS_CATEGORIES,
+    MECHANISM_TYPES,
+    CANONICAL_CLASSES,
+    CLASS_REGISTRY,
+    resolveClassAndMechanism,
     NORDIC_UART_SERVICE_UUID,
     NORDIC_UART_RX_UUID,
     NORDIC_UART_TX_UUID,

@@ -126,3 +126,17 @@ Backend berbasis Python FastAPI & OpenCV yang berjalan pada `http://127.0.0.1:80
    http://localhost:8080/
    ```
    Status backend YOLO Studio pada topbar akan menunjukkan status **ONLINE** berwarna hijau.
+
+---
+
+## 5. Dukungan Model 6-Kelas Mekanis (Phase 2 Update)
+
+Pada rilis Phase 2, YOLO Studio mendukung skema 6 kelas mekanisme-warna secara native:
+- `merah_arm`, `kuning_arm`, `biru_arm` (Objek diproses dengan Robotic Arm)
+- `merah_servo`, `kuning_servo`, `biru_servo` (Objek diproses dengan Flap Servo)
+
+### Keunggulan:
+1. **Deteksi Terpadu:** AI mengidentifikasi warna sekaligus target aktuator secara simultan dalam satu inferensi.
+2. **Two-Stage Execution Cycle:** Hasil deteksi otomatis memicu Stage 1 (`setMechanism`) dan Stage 2 (`sortObject`) ke mikrokontroler tanpa intervensi manual.
+3. **Non-Maximum Suppression (NMS):** Backend secara otomatis menyaring deteksi duplikat dengan threshold IoU > 0.5 sehingga objek pada conveyor belt tidak memicu perintah berulang.
+4. **Kompatibilitas Mundur (Legacy 3-Color):** Model 3-kelas lama (`merah`, `kuning`, `biru`) tetap didukung penuh menggunakan pemetaan konfigurasi operator (*Legacy Mechanism Map*).

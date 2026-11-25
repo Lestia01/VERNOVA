@@ -766,17 +766,133 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             </div>
           </div>
 
-          <div class="card p-4 mb-5 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
-            <div class="flex items-center gap-2.5 w-full sm:w-auto">
-              <label class="text-[10px] font-black uppercase tracking-[.12em] t-muted whitespace-nowrap" data-i18n="dash.mode">Sorting Mode</label>
-              <select id="mode-selector" onchange="window.changeSortingMode(this.value)" class="inp flex-1 sm:flex-none !py-2.5 !px-3 cursor-pointer sm:!w-auto min-h-[44px]">
-                <option value="Servo" data-i18n="dash.modeServo">🤖 Servo Mode</option>
-                <option value="Arm" data-i18n="dash.modeArm">🦾 Arm Mode</option>
-              </select>
+          <!-- ============ KONTROL OPERASIONAL: AUTO VS MANUAL & MEKANISME ============ -->
+          <div class="card p-4 mb-4 flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+            <div class="flex items-center gap-3 flex-wrap w-full lg:w-auto">
+              <!-- Switch Mode Operasi (AUTO vs MANUAL) -->
+              <div class="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border text-xs" style="border-color:var(--border)">
+                <button type="button" id="btn-opmode-auto" onclick="window.setOperatingMode('AUTO')" class="px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all bg-emerald-600 text-white shadow">
+                  <i class="fas fa-bolt text-[11px]"></i><span>AUTO (AI Driven)</span>
+                </button>
+                <button type="button" id="btn-opmode-manual" onclick="window.setOperatingMode('MANUAL')" class="px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all text-slate-600 dark:text-slate-300">
+                  <i class="fas fa-gamepad text-[11px]"></i><span>MANUAL</span>
+                </button>
+              </div>
+
+              <!-- Selector Mekanisme Default / Aktif -->
+              <div class="flex items-center gap-2">
+                <label class="text-[10px] font-black uppercase tracking-[.12em] t-muted whitespace-nowrap">Mekanisme:</label>
+                <select id="mode-selector" onchange="window.changeSortingMode(this.value)" class="inp !py-1.5 !px-2.5 text-xs font-bold cursor-pointer">
+                  <option value="Servo">🤖 Servo Flap</option>
+                  <option value="Arm">🦾 Lengan Robot (Arm)</option>
+                </select>
+              </div>
+
+              <!-- Tombol Konfigurasi Pemetaan Kelas Warisan -->
+              <button type="button" onclick="window.openModal('legacy-mapping-modal')" class="text-xs px-2.5 py-1.5 rounded-lg border font-bold flex items-center gap-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition" style="border-color:var(--border)">
+                <i class="fas fa-map-location-dot text-blue-500"></i><span>Mapping Kelas AI</span>
+              </button>
             </div>
-            <button onclick="window.openExportModal()" class="btn-primary w-full sm:w-auto px-4 py-3 sm:py-2.5 text-[12px] sm:text-[11px] flex items-center justify-center gap-2 min-h-[44px]">
-              <i class="fas fa-file-export"></i><span data-i18n="btn.export">Export Report</span>
-            </button>
+
+            <div class="flex items-center gap-2 w-full lg:w-auto justify-end">
+              <span id="opmode-badge" class="pill green text-[10px] font-bold">MODE: AUTO</span>
+              <button onclick="window.openExportModal()" class="btn-primary px-3 py-2 text-[11px] flex items-center justify-center gap-1.5">
+                <i class="fas fa-file-export"></i><span data-i18n="btn.export">Export Report</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- ============ PANEL KONTROL MANUAL SORTING (Muncul saat Mode MANUAL) ============ -->
+          <div id="manual-sorting-panel" class="card p-4 sm:p-5 mb-5 hidden border-2 border-amber-500/40 bg-amber-500/5">
+            <div class="flex items-center justify-between mb-3 border-b pb-2.5" style="border-color:var(--border)">
+              <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
+                <h3 class="card-title !mb-0 text-amber-700 dark:text-amber-400">
+                  <i class="fas fa-gamepad"></i> Stasiun Kontrol Sortir Manual (Operator)
+                </h3>
+              </div>
+              <span class="text-[10px] px-2.5 py-1 rounded-md font-black bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                MANUAL CONTROL ACTIVE
+              </span>
+            </div>
+            <p class="text-xs t-muted mb-4">
+              Dalam mode <strong>MANUAL</strong>, deteksi kamera hanya bersifat visual dan <strong>tidak memicu gerakan robot otomatis</strong>. Pengguna mengendalikan eksekusi pemilahan secara langsung melalui stasiun kontrol ini.
+            </p>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              <!-- 1. Perangkat Tujuan -->
+              <div>
+                <label class="text-[11px] font-bold t-muted block mb-1">Perangkat Tujuan</label>
+                <select id="man-device-select" class="inp text-xs font-bold" onchange="window.handleManualDeviceChange(this.value)">
+                  <option value="ESP32">ESP32 DevKit V1</option>
+                  <option value="MICROBIT">BBC micro:bit</option>
+                </select>
+              </div>
+              <!-- 2. Metode Koneksi -->
+              <div>
+                <label class="text-[11px] font-bold t-muted block mb-1">Metode Koneksi</label>
+                <select id="man-conn-select" class="inp text-xs font-bold" onchange="window.handleManualConnectionChange(this.value)">
+                  <option value="WIFI">Wi-Fi Lokal (HTTP REST)</option>
+                  <option value="BLE">Bluetooth BLE (GATT UART)</option>
+                </select>
+              </div>
+              <!-- 3. Mekanisme Target -->
+              <div>
+                <label class="text-[11px] font-bold t-muted block mb-1">Mekanisme Target</label>
+                <select id="man-mech-select" class="inp text-xs font-bold">
+                  <option value="servo">🤖 Servo Flap (Jalur)</option>
+                  <option value="arm">🦾 Lengan Robot (Arm)</option>
+                </select>
+              </div>
+              <!-- 4. Kelas Warna -->
+              <div>
+                <label class="text-[11px] font-bold t-muted block mb-1">Kelas Warna Sortir</label>
+                <select id="man-color-select" class="inp text-xs font-bold">
+                  <option value="merah">🔴 Merah</option>
+                  <option value="kuning">🟡 Kuning</option>
+                  <option value="biru">🔵 Biru</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row items-center gap-3 justify-between pt-3 border-t" style="border-color:var(--border)">
+              <div class="flex items-center gap-2 w-full sm:w-auto">
+                <button type="button" id="btn-manual-send" onclick="window.sendManualSortCommand()" class="btn-primary flex-1 sm:flex-none px-5 py-2.5 text-xs font-black flex items-center justify-center gap-2 shadow-md min-h-[40px]">
+                  <i class="fas fa-paper-plane"></i><span>KIRIM PERINTAH</span>
+                </button>
+                <button type="button" id="btn-manual-stop" onclick="window.sendEmergencyStopManual()" class="px-4 py-2.5 rounded-xl font-black text-xs bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center gap-1.5 transition min-h-[40px]">
+                  <i class="fas fa-hand"></i><span>EMERGENCY STOP</span>
+                </button>
+              </div>
+
+              <!-- Indikator Telemetri Transaksi Manual -->
+              <div class="flex items-center gap-2 flex-wrap text-[11px] w-full sm:w-auto justify-end">
+                <span id="man-tx-pill" class="pill">TX: IDLE</span>
+                <span id="man-ack-pill" class="pill">ACK: —</span>
+                <span id="man-verif-pill" class="pill">VERIFIKASI: BELUM TERVERIFIKASI FISIK</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============ STATUS TRANSAKSI & VERIFIKASI 2-TAHAP LIVE ============ -->
+          <div id="live-transaction-card" class="card p-3.5 mb-5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs bg-slate-50 dark:bg-slate-900/40">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 font-bold">
+                <i class="fas fa-arrows-spin" id="tx-live-icon"></i>
+              </div>
+              <div>
+                <div class="flex items-center gap-2">
+                  <strong class="t-main" id="tx-live-title">Status Transaksi: IDLE</strong>
+                  <span id="tx-live-badge" class="pill gray text-[9px] uppercase">READY</span>
+                </div>
+                <p id="tx-live-detail" class="text-[11px] t-muted mt-0.5">Menunggu deteksi AI atau input perintah manual operator...</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap text-[10px]">
+              <span id="tx-stage-mech" class="pill gray">1. Mekanisme: Siap</span>
+              <span id="tx-stage-sort" class="pill gray">2. Kelas: Siap</span>
+              <span id="tx-stage-verif" class="pill gray">3. Sensor: Belum Terverifikasi Fisik</span>
+            </div>
           </div>
 
           <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 mb-5">
@@ -1507,6 +1623,68 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       <button id="btn-conn-fb" class="btn-primary w-full py-3.5 text-xs mt-5 min-h-[48px]">
         <i class="fas fa-plug mr-2"></i><span data-i18n="fb.connect">CONNECT TO DATABASE</span>
       </button>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: PEMETAAN KELAS AI KE MEKANISME ===================== -->
+  <div id="legacy-mapping-modal" class="modal">
+    <div class="modal-backdrop" onclick="window.closeModal('legacy-mapping-modal')"></div>
+    <div class="modal-panel max-w-md">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white shadow-sm bg-blue-600">
+            <i class="fas fa-map-location-dot text-sm"></i>
+          </div>
+          <div>
+            <h3 class="font-black text-sm sm:text-base leading-tight t-main">Pemetaan Mekanisme Kelas AI</h3>
+            <p class="text-[10px] t-muted">Konfigurasi aksi fisik aktuator untuk setiap kelas warna</p>
+          </div>
+        </div>
+        <button onclick="window.closeModal('legacy-mapping-modal')" class="icon-btn" aria-label="Tutup"><i class="fas fa-xmark"></i></button>
+      </div>
+
+      <div class="space-y-3.5 mb-4 text-xs">
+        <div class="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-[11px] leading-relaxed">
+          <i class="fas fa-circle-info text-blue-600 mr-1"></i>
+          <strong>Model 6 Kelas</strong> (misal <code>merah_arm</code>, <code>biru_servo</code>) akan otomatis menentukan mekanisme tanpa perlu dipetakan. Dropdown di bawah khusus untuk <strong>model 3 warna standar</strong>.
+        </div>
+
+        <div class="space-y-2">
+          <!-- Merah -->
+          <div class="flex items-center justify-between p-2 rounded-lg border bg-slate-50 dark:bg-slate-900/50" style="border-color:var(--border)">
+            <span class="font-bold flex items-center gap-1.5"><i class="fas fa-circle text-red-600"></i> Warna Merah</span>
+            <select id="map-color-merah" class="inp !py-1 !px-2.5 text-xs font-bold w-40">
+              <option value="servo">🤖 Servo Flap</option>
+              <option value="arm">🦾 Lengan Robot (Arm)</option>
+            </select>
+          </div>
+
+          <!-- Kuning -->
+          <div class="flex items-center justify-between p-2 rounded-lg border bg-slate-50 dark:bg-slate-900/50" style="border-color:var(--border)">
+            <span class="font-bold flex items-center gap-1.5"><i class="fas fa-circle text-amber-500"></i> Warna Kuning</span>
+            <select id="map-color-kuning" class="inp !py-1 !px-2.5 text-xs font-bold w-40">
+              <option value="servo">🤖 Servo Flap</option>
+              <option value="arm">🦾 Lengan Robot (Arm)</option>
+            </select>
+          </div>
+
+          <!-- Biru -->
+          <div class="flex items-center justify-between p-2 rounded-lg border bg-slate-50 dark:bg-slate-900/50" style="border-color:var(--border)">
+            <span class="font-bold flex items-center gap-1.5"><i class="fas fa-circle text-blue-600"></i> Warna Biru</span>
+            <select id="map-color-biru" class="inp !py-1 !px-2.5 text-xs font-bold w-40">
+              <option value="servo">🤖 Servo Flap</option>
+              <option value="arm" selected>🦾 Lengan Robot (Arm)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex gap-2 justify-end pt-2 border-t" style="border-color:var(--border)">
+        <button type="button" onclick="window.closeModal('legacy-mapping-modal')" class="btn-ghost px-4 py-2 text-xs">Batal</button>
+        <button type="button" onclick="window.saveLegacyMapping()" class="btn-primary px-4 py-2 text-xs font-bold flex items-center gap-1.5">
+          <i class="fas fa-floppy-disk"></i><span>Simpan Pemetaan</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -2371,6 +2549,200 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   };
 
   /* ================================================================== */
+  /*  PHASE 2: AUTO/MANUAL, MECHANISM MAPPING & TRANSACTION TELEMETRY   */
+  /* ================================================================== */
+  window.setOperatingMode = (mode) => {
+    try {
+      const res = window.deviceManager.setOperatingMode(mode);
+      if (!res.ok) {
+        showToast(res.message || "Gagal mengubah mode pengoperasian.");
+        return;
+      }
+      const isAuto = mode === 'AUTO';
+      const btnAuto = $('btn-opmode-auto');
+      const btnMan = $('btn-opmode-manual');
+      const badge = $('opmode-badge');
+      const manPanel = $('manual-sorting-panel');
+
+      if (btnAuto && btnMan) {
+        if (isAuto) {
+          btnAuto.className = 'px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all bg-emerald-600 text-white shadow';
+          btnMan.className = 'px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all text-slate-600 dark:text-slate-300';
+        } else {
+          btnMan.className = 'px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all bg-amber-600 text-white shadow';
+          btnAuto.className = 'px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all text-slate-600 dark:text-slate-300';
+        }
+      }
+
+      if (badge) {
+        badge.innerText = `MODE: ${mode}`;
+        badge.className = isAuto ? 'pill green text-[10px] font-bold' : 'pill yellow text-[10px] font-bold';
+      }
+
+      if (manPanel) {
+        manPanel.classList.toggle('hidden', isAuto);
+      }
+
+      showToast(isAuto ? "Mode AUTO aktif (Keputusan mekanisme dari AI Vision)" : "Mode MANUAL aktif (Kontrol fisik via stasiun operator)");
+      logActivity(isAuto ? "fas fa-bolt" : "fas fa-gamepad", isAuto ? "background:rgba(16,185,129,.15);color:#10b981" : "background:rgba(245,158,11,.15);color:#f59e0b", "Operating Mode Changed", `Mode diubah ke ${mode}`);
+    } catch (e) {
+      showToast("Error mode: " + e.message);
+    }
+  };
+
+  window.handleManualDeviceChange = async (devType) => {
+    const connSelect = $('man-conn-select');
+    if (devType === 'MICROBIT') {
+      if (connSelect) {
+        connSelect.value = 'BLE';
+        const optW = connSelect.querySelector('option[value="WIFI"]');
+        if (optW) optW.disabled = true;
+      }
+    } else {
+      if (connSelect) {
+        const optW = connSelect.querySelector('option[value="WIFI"]');
+        if (optW) optW.disabled = false;
+      }
+    }
+    const connType = connSelect ? connSelect.value : 'WIFI';
+    try {
+      await window.deviceManager.switchDevice(devType, connType);
+      showToast(`Target manual diubah ke ${devType} (${connType})`);
+    } catch (e) {
+      showToast("Error target perangkat: " + e.message);
+    }
+  };
+
+  window.handleManualConnectionChange = async (connType) => {
+    const devSelect = $('man-device-select');
+    const devType = devSelect ? devSelect.value : 'ESP32';
+    try {
+      await window.deviceManager.switchDevice(devType, connType);
+      showToast(`Koneksi manual diubah ke ${connType}`);
+    } catch (e) {
+      showToast("Error metode koneksi: " + e.message);
+    }
+  };
+
+  window.sendManualSortCommand = async () => {
+    const color = $('man-color-select')?.value || 'merah';
+    const mechanism = $('man-mech-select')?.value || 'servo';
+    const btnSend = $('btn-manual-send');
+    if (btnSend) btnSend.disabled = true;
+
+    showToast(`Mengirim perintah manual: ${color.toUpperCase()} (${mechanism.toUpperCase()})...`);
+    logActivity("fas fa-paper-plane", "background:rgba(59,130,246,.15);color:#3b82f6", "Manual Sort Sent", `${color} -> ${mechanism}`);
+
+    try {
+      const res = await window.deviceManager.sendManualSort({ color, mechanism });
+      if (res && res.ok) {
+        showToast(`Sukses sortir manual: ${color} (${mechanism})`);
+        triggerSortAction(color, res);
+      } else {
+        showToast("Sortir manual gagal: " + (res?.reason || res?.error || 'Ditolak perangkat'));
+        logActivity("fas fa-circle-xmark", "background:rgba(239,68,68,.15);color:#ef4444", "Manual Sort Failed", res?.reason || res?.error || 'Failed');
+      }
+    } catch (e) {
+      showToast("Error sortir manual: " + e.message);
+    } finally {
+      if (btnSend) btnSend.disabled = false;
+    }
+  };
+
+  window.sendEmergencyStopManual = async () => {
+    showToast("Mengirim EMERGENCY STOP ke robot...");
+    try {
+      const res = await window.deviceManager.dispatchEmergencyStop();
+      showToast(res && res.ok ? "Robot BERHENTI (Emergency Stop Aktif)!" : "Gagal menghentikan robot!");
+      logActivity("fas fa-hand", "background:rgba(239,68,68,.15);color:#ef4444", "Emergency Stop Triggered", "Manual stop button pressed");
+    } catch (e) {
+      showToast("Error emergency stop: " + e.message);
+    }
+  };
+
+  window.saveLegacyMapping = () => {
+    const merah = $('map-color-merah')?.value || 'servo';
+    const kuning = $('map-color-kuning')?.value || 'servo';
+    const biru = $('map-color-biru')?.value || 'arm';
+
+    window.deviceManager.setLegacyMechanismMap({ merah, kuning, biru });
+    window.closeModal('legacy-mapping-modal');
+    showToast("Pemetaan kelas warisan berhasil disimpan!");
+    logActivity("fas fa-map-location-dot", "background:rgba(59,130,246,.15);color:#3b82f6", "Mapping Updated", `Merah:${merah}, Kuning:${kuning}, Biru:${biru}`);
+  };
+
+  function updateTransactionTelemetryUI(tx) {
+    if (!tx) return;
+    const title = $('tx-live-title');
+    const badge = $('tx-live-badge');
+    const detail = $('tx-live-detail');
+    const stageMech = $('tx-stage-mech');
+    const stageSort = $('tx-stage-sort');
+    const stageVerif = $('tx-stage-verif');
+
+    // Manual Panel Pills
+    const manTx = $('man-tx-pill');
+    const manAck = $('man-ack-pill');
+    const manVerif = $('man-verif-pill');
+
+    if (title) title.innerText = `Transaksi: ${tx.id || tx.transactionId || 'IDLE'}`;
+
+    if (badge) {
+      badge.innerText = tx.state || 'READY';
+      if (tx.state === 'COMPLETED') badge.className = 'pill green text-[9px] uppercase';
+      else if (tx.state === 'FAILED' || tx.state === 'TIMEOUT') badge.className = 'pill red text-[9px] uppercase';
+      else badge.className = 'pill yellow text-[9px] uppercase';
+    }
+
+    if (detail) {
+      detail.innerText = `Kelas: ${tx.detectedClass || tx.color} · Mode: ${tx.mechanism || tx.mode} · Durasi: ${tx.durationMs || 0}ms · Kategori: ${tx.statusCategory || 'unknown'}`;
+    }
+
+    if (stageMech) {
+      if (tx.mechanismAck) {
+        stageMech.className = 'pill green';
+        stageMech.innerText = `1. Mekanisme: Siap (${tx.mechanism || 'OK'})`;
+      } else if (tx.state === 'AWAITING_MECHANISM_ACK') {
+        stageMech.className = 'pill yellow animate-pulse';
+        stageMech.innerText = '1. Mekanisme: Menunggu ACK...';
+      } else {
+        stageMech.className = 'pill gray';
+        stageMech.innerText = '1. Mekanisme: Siap';
+      }
+    }
+
+    if (stageSort) {
+      if (tx.classAck) {
+        stageSort.className = 'pill green';
+        stageSort.innerText = `2. Kelas: Selesai (${tx.color || 'OK'})`;
+      } else if (tx.state === 'SORTING' || tx.state === 'AWAITING_CLASS_ACK') {
+        stageSort.className = 'pill yellow animate-pulse';
+        stageSort.innerText = '2. Kelas: Menyortir...';
+      } else {
+        stageSort.className = 'pill gray';
+        stageSort.innerText = '2. Kelas: Siap';
+      }
+    }
+
+    if (stageVerif) {
+      if (tx.verified) {
+        stageVerif.className = 'pill green';
+        stageVerif.innerText = '3. Sensor: Terverifikasi Fisik';
+      } else if (tx.state === 'COMPLETED') {
+        stageVerif.className = 'pill blue';
+        stageVerif.innerText = '3. Sensor: Selesai (Belum Terverifikasi Fisik)';
+      } else {
+        stageVerif.className = 'pill gray';
+        stageVerif.innerText = '3. Sensor: Belum Terverifikasi Fisik';
+      }
+    }
+
+    if (manTx) manTx.innerText = `TX: ${tx.id || 'IDLE'}`;
+    if (manAck) manAck.innerText = tx.mechanismAck ? `ACK: READY (${tx.mechanism})` : (tx.state === 'AWAITING_MECHANISM_ACK' ? 'ACK: MENUNGGU...' : 'ACK: —');
+    if (manVerif) manVerif.innerText = tx.verified ? 'VERIFIKASI: VALID SENSOR' : 'VERIFIKASI: BELUM TERVERIFIKASI FISIK';
+  }
+
+  /* ================================================================== */
   /*  TEACHABLE MACHINE AI                                               */
   /* ================================================================== */
   let model, webcam, labelContainer, maxPredictions;
@@ -2866,13 +3238,21 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     const execStatus = espRes.executionStatus || (window.esp32Client.isSimulated() ? 'simulated_esp32' : 'confirmed_esp32_wifi');
     const espDeviceId = espRes.esp32DeviceId || (window.esp32Client.lastTelemetry && window.esp32Client.lastTelemetry.deviceId) || 'VERNOVA-ESP32';
     const cmdId = espRes.commandId || `CMD_${nowMs}`;
+    const txObj = espRes.transaction || {};
+    const isVerified = Boolean(espRes.verified || txObj.verified);
+    const statusCat = espRes.statusCategory || txObj.statusCategory || (isVerified ? 'verified' : 'completed_unverified');
+    const opMode = window.deviceManager ? window.deviceManager.getOperatingMode() : 'AUTO';
 
     state.excelLogs.push({
       datetime: dateTimeStr,
       timestamp: timeStr,
       warna: properColorName,
       mode: currentMode,
-      status: "Berhasil",
+      sortingMode: opMode,
+      transactionId: cmdId,
+      statusCategory: statusCat,
+      verified: isVerified,
+      status: isVerified ? "Berhasil (Terverifikasi)" : "Berhasil (Belum Terverifikasi Fisik)",
       duration: formatDuration(durationMs),
       durationMs: durationMs || 0,
       nilai: 1
@@ -2880,9 +3260,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
     updateUIStats(); updateChart();
 
-    pushFeed({ icon: 'fas fa-check', style: feedStyleFor(category),
-      title: `${properColorName} Tersortir (${espRes.simulated ? 'SIM' : 'ESP32'})`,
-      desc: `${dateTimeStr} · ${currentMode} · ${formatDuration(durationMs)}`,
+    pushFeed({ icon: isVerified ? 'fas fa-circle-check' : 'fas fa-check', style: feedStyleFor(category),
+      title: `${properColorName} Tersortir (${isVerified ? 'TERVERIFIKASI' : 'BELUM TERVERIFIKASI FISIK'})`,
+      desc: `${dateTimeStr} · ${currentMode} · ${formatDuration(durationMs)} · ${opMode}`,
       ts: nowMs, kind: 'data', key: `ok|${category}|${nowMs}|${currentMode}` });
 
     if (state.db) {
@@ -2890,15 +3270,27 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         await push(ref(state.db, `${state.currentPath}/${category}`), {
           runId: `sort_${nowMs}_${Math.random().toString(36).slice(2, 7)}`,
           commandId: cmdId,
+          transactionId: cmdId,
           esp32DeviceId: espDeviceId,
+          deviceId: window.deviceManager ? window.deviceManager.config.deviceType : espDeviceId,
           timestamp: nowMs,
           detectedColor: properColorName,
           warna: properColorName,
+          predictedClass: txObj.detectedClass || properColorName,
+          aiEngine: txObj.aiEngine || (window.yoloClient?.isYoloActive() ? 'yolo' : 'teachable_machine'),
+          modelId: txObj.modelId || null,
+          confidence: txObj.confidence || null,
+          mechanism: currentMode,
           mode: currentMode,
-          commandStatus: 'sent',
+          sortingMode: opMode,
+          commandStatus: txObj.state || 'COMPLETED',
+          deviceAcknowledgment: Boolean(txObj.classAck || espRes.ok),
+          statusCategory: statusCat,
+          verificationStatus: isVerified ? 'verified' : 'completed_unverified',
+          verified: isVerified,
           executionStatus: execStatus,
           sortResult: 'success',
-          status: 'Berhasil',
+          status: isVerified ? 'Berhasil (Terverifikasi)' : 'Berhasil (Belum Terverifikasi Fisik)',
           duration: durationMs || 0,
           durationMs: durationMs || 0,
           value: 1
@@ -4997,6 +5389,27 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     try { ensureTMLibs().catch(() => {}); } catch (e) {}
     try { pickRaiVoice(); if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = pickRaiVoice; } catch (e) {}
     try { if (window.yoloStudioUI) window.yoloStudioUI.init(); } catch (e) { console.warn('YOLO Studio UI init error:', e); }
+
+    // Phase 2: Inisialisasi Mode Operasional & Sinkronisasi Pemetaan Mekanisme
+    try {
+      if (window.deviceManager) {
+        window.deviceManager.onStatusChange((event) => {
+          if (event.type === 'transaction_update' && typeof updateTransactionTelemetryUI === 'function') {
+            updateTransactionTelemetryUI(event.transaction);
+          }
+        });
+        const currentOpMode = window.deviceManager.getOperatingMode();
+        if (typeof window.setOperatingMode === 'function') {
+          window.setOperatingMode(currentOpMode);
+        }
+        const savedMap = window.deviceManager.getLegacyMechanismMap();
+        if ($('map-color-merah')) $('map-color-merah').value = savedMap.merah || 'servo';
+        if ($('map-color-kuning')) $('map-color-kuning').value = savedMap.kuning || 'servo';
+        if ($('map-color-biru')) $('map-color-biru').value = savedMap.biru || 'arm';
+      }
+    } catch (e) {
+      console.warn('Phase 2 init error:', e);
+    }
 
     setTimeout(() => showToast(state.lang === 'id' ? 'Sistem siap · R-LAB' : 'System ready · R-LAB'), 700);
   })();

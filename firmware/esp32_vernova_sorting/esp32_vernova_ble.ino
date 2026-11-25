@@ -75,24 +75,58 @@ class MyCallbacks: public BLECharacteristicCallbacks {
 
         // Parsing JSON atau String sederhana
         String color = "";
+        String txId = "";
+        
+        int idIdx = rxValue.indexOf("\"id\":");
+        if (idIdx == -1) idIdx = rxValue.indexOf("\"txId\":");
+        if (idIdx != -1) {
+          int startQ = rxValue.indexOf("\"", idIdx + 5);
+          int endQ = rxValue.indexOf("\"", startQ + 1);
+          if (startQ != -1 && endQ != -1) txId = rxValue.substring(startQ + 1, endQ);
+        }
+
         if (rxValue.indexOf("kuning") != -1) color = "kuning";
         else if (rxValue.indexOf("biru") != -1) color = "biru";
         else if (rxValue.indexOf("merah") != -1) color = "merah";
 
-        if (color != "") {
+        if (rxValue.indexOf("mechanism") != -1 || rxValue.indexOf("mech") != -1) {
+          if (rxValue.indexOf("arm") != -1 || rxValue.indexOf("Arm") != -1) currentMode = "Arm";
+          else currentMode = "Servo";
+
+          if (deviceConnected && pTxCharacteristic) {
+            String ack = "{\"ok\":true,\"ack\":\"mechanism\",\"mechanism\":\"" + String(currentMode == "Arm" ? "arm" : "servo") + "\",\"status\":\"READY\",\"ready\":true,\"txId\":\"" + txId + "\"}\n";
+            pTxCharacteristic->setValue(ack.c_str());
+            pTxCharacteristic->notify();
+          }
+        } else if (color != "") {
           executeSort(color);
           if (deviceConnected && pTxCharacteristic) {
-            String ack = "{\"ok\":true,\"color\":\"" + color + "\",\"status\":\"COMPLETED\"}\n";
+            String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + color + "\",\"status\":\"COMPLETED\",\"sensorVerified\":false,\"id\":\"" + txId + "\"}\n";
             pTxCharacteristic->setValue(ack.c_str());
             pTxCharacteristic->notify();
           }
         } else if (rxValue.indexOf("arm") != -1 || rxValue.indexOf("Arm") != -1) {
           currentMode = "Arm";
+          if (deviceConnected && pTxCharacteristic) {
+            String ack = "{\"ok\":true,\"ack\":\"mode\",\"mode\":\"Arm\",\"status\":\"READY\"}\n";
+            pTxCharacteristic->setValue(ack.c_str());
+            pTxCharacteristic->notify();
+          }
         } else if (rxValue.indexOf("servo") != -1 || rxValue.indexOf("Servo") != -1) {
           currentMode = "Servo";
+          if (deviceConnected && pTxCharacteristic) {
+            String ack = "{\"ok\":true,\"ack\":\"mode\",\"mode\":\"Servo\",\"status\":\"READY\"}\n";
+            pTxCharacteristic->setValue(ack.c_str());
+            pTxCharacteristic->notify();
+          }
         } else if (rxValue.indexOf("stop") != -1) {
           servoFlap.write(90);
           servoArm.write(20);
+          if (deviceConnected && pTxCharacteristic) {
+            String ack = "{\"ok\":true,\"ack\":\"stop\",\"status\":\"STOPPED\"}\n";
+            pTxCharacteristic->setValue(ack.c_str());
+            pTxCharacteristic->notify();
+          }
         }
       }
     }
