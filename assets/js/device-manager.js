@@ -1672,9 +1672,24 @@
         sendEmergencyStop: async () => {
           return await self.dispatchEmergencyStop();
         },
+        getOperatingMode: () => self.getOperatingMode(),
+        setOperatingMode: (m) => self.setOperatingMode(m),
+        getLegacyMechanismMap: () => self.getLegacyMechanismMap(),
+        setLegacyMechanismMap: (map) => self.setLegacyMechanismMap(map),
+        sendManualSort: async (params) => self.sendManualSort(params),
         onStatusChange: (fn) => self.onStatusChange(fn)
       };
     }
+  }
+
+  // Explicit prototype assignment untuk menjaga integritas method di semua environment
+  if (typeof DeviceConnectionManager !== 'undefined') {
+    DeviceConnectionManager.prototype.getOperatingMode = DeviceConnectionManager.prototype.getOperatingMode || function () { return this.operatingMode || 'AUTO'; };
+    DeviceConnectionManager.prototype.setOperatingMode = DeviceConnectionManager.prototype.setOperatingMode || function (m) {
+      const mode = String(m || '').toUpperCase().trim();
+      this.operatingMode = mode;
+      return { ok: true, operatingMode: mode };
+    };
   }
 
   // Export module untuk Browser & Node.js

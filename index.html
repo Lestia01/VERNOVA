@@ -31,11 +31,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
-<script src="assets/js/esp32-client.js"></script>
-<script src="assets/js/device-manager.js"></script>
-<script src="assets/js/smart-data-assistant.js"></script>
-<script src="assets/js/yolo-client.js"></script>
-<script src="assets/js/yolo-studio-ui.js"></script>
+<script src="assets/js/esp32-client.js?v=2.6.0"></script>
+<script src="assets/js/device-manager.js?v=2.6.0"></script>
+<script src="assets/js/smart-data-assistant.js?v=2.6.0"></script>
+<script src="assets/js/yolo-client.js?v=2.6.0"></script>
+<script src="assets/js/yolo-studio-ui.js?v=2.6.0"></script>
 
   <style>
   /* ================= THEME TOKENS ================= */
@@ -2246,14 +2246,69 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   /* ================================================================== */
   /*  UNIFIED DEVICE & CONNECTION MANAGER INTEGRATION (ESP32 & MICRO:BIT)*/
   /* ================================================================== */
-  window.deviceManager = new DeviceConnectionManager();
+  window.deviceManager = (typeof DeviceConnectionManager !== 'undefined')
+    ? new DeviceConnectionManager()
+    : {};
+
+  // Polyfill / Defensive fallback agar method Phase 2 selalu ada meski skrip lama tersangkut di cache browser
+  (function ensureDeviceManagerMethods(dm) {
+    if (!dm) return;
+    if (typeof dm.getOperatingMode !== 'function') {
+      dm.operatingMode = dm.operatingMode || 'AUTO';
+      dm.getOperatingMode = function () { return this.operatingMode || 'AUTO'; };
+    }
+    if (typeof dm.setOperatingMode !== 'function') {
+      dm.setOperatingMode = function (mode) {
+        const m = String(mode || '').toUpperCase().trim();
+        if (m !== 'AUTO' && m !== 'MANUAL') {
+          return { ok: false, error: 'INVALID_MODE', message: `Operating mode tidak valid: "${mode}". Harus AUTO atau MANUAL.` };
+        }
+        this.operatingMode = m;
+        if (typeof this.saveConfig === 'function') this.saveConfig({ operatingMode: m });
+        if (typeof this._notifyManagerListeners === 'function') {
+          this._notifyManagerListeners({ type: 'operating_mode_changed', operatingMode: m, timestamp: new Date().toISOString() });
+        }
+        return { ok: true, operatingMode: m };
+      };
+    }
+    if (typeof dm.getLegacyMechanismMap !== 'function') {
+      dm.getLegacyMechanismMap = function () {
+        return Object.assign({ merah: 'servo', kuning: 'servo', biru: 'arm' }, this.legacyMechanismMap || {});
+      };
+    }
+    if (typeof dm.setLegacyMechanismMap !== 'function') {
+      dm.setLegacyMechanismMap = function (map) {
+        this.legacyMechanismMap = Object.assign({ merah: 'servo', kuning: 'servo', biru: 'arm' }, this.legacyMechanismMap || {}, map || {});
+        if (typeof this.saveConfig === 'function') this.saveConfig({ legacyMechanismMap: this.legacyMechanismMap });
+        return this.legacyMechanismMap;
+      };
+    }
+    if (typeof dm.sendManualSort !== 'function') {
+      dm.sendManualSort = async function (params = {}) {
+        if (typeof this.dispatchSortingCommand === 'function') {
+          return await this.dispatchSortingCommand(Object.assign({}, params, { force: true }));
+        }
+        return { ok: true, simulated: true };
+      };
+    }
+    if (typeof dm.onStatusChange !== 'function') {
+      dm.onStatusChange = function (fn) {
+        if (typeof this.addListener === 'function') this.addListener(fn);
+      };
+    }
+  })(window.deviceManager);
+
   // Proxy backward-compatibility agar pemanggilan legacy tetap berjalan transparan
-  window.esp32Client = window.deviceManager.createLegacyEsp32ClientProxy();
+  window.esp32Client = (window.deviceManager && typeof window.deviceManager.createLegacyEsp32ClientProxy === 'function')
+    ? window.deviceManager.createLegacyEsp32ClientProxy()
+    : (typeof Esp32Client !== 'undefined' ? new Esp32Client() : {});
 
   // Sinkronisasi status terpadu ke antarmuka (Top bar pill, tombol, dan modal)
-  window.deviceManager.onStatusChange((ev) => {
-    updateDeviceUI(ev);
-  });
+  if (window.deviceManager && typeof window.deviceManager.onStatusChange === 'function') {
+    window.deviceManager.onStatusChange((ev) => {
+      updateDeviceUI(ev);
+    });
+  }
 
   function updateDeviceUI(ev) {
     const pill = $('status-esp32');
@@ -2553,12 +2608,23 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   /* ================================================================== */
   window.setOperatingMode = (mode) => {
     try {
-      const res = window.deviceManager.setOperatingMode(mode);
-      if (!res.ok) {
-        showToast(res.message || "Gagal mengubah mode pengoperasian.");
+      const targetMode = String(mode || '').toUpperCase().trim();
+      let res = { ok: true, operatingMode: targetMode };
+
+      if (window.deviceManager) {
+        if (typeof window.deviceManager.setOperatingMode === 'function') {
+          res = window.deviceManager.setOperatingMode(targetMode);
+        } else {
+          window.deviceManager.operatingMode = targetMode;
+          res = { ok: true, operatingMode: targetMode };
+        }
+      }
+
+      if (!res || !res.ok) {
+        showToast(res && res.message ? res.message : "Gagal mengubah mode pengoperasian.");
         return;
       }
-      const isAuto = mode === 'AUTO';
+      const isAuto = targetMode === 'AUTO';
       const btnAuto = $('btn-opmode-auto');
       const btnMan = $('btn-opmode-manual');
       const badge = $('opmode-badge');
@@ -2575,7 +2641,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       }
 
       if (badge) {
-        badge.innerText = `MODE: ${mode}`;
+        badge.innerText = `MODE: ${targetMode}`;
         badge.className = isAuto ? 'pill green text-[10px] font-bold' : 'pill yellow text-[10px] font-bold';
       }
 
@@ -2584,8 +2650,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       }
 
       showToast(isAuto ? "Mode AUTO aktif (Keputusan mekanisme dari AI Vision)" : "Mode MANUAL aktif (Kontrol fisik via stasiun operator)");
-      logActivity(isAuto ? "fas fa-bolt" : "fas fa-gamepad", isAuto ? "background:rgba(16,185,129,.15);color:#10b981" : "background:rgba(245,158,11,.15);color:#f59e0b", "Operating Mode Changed", `Mode diubah ke ${mode}`);
+      logActivity(isAuto ? "fas fa-bolt" : "fas fa-gamepad", isAuto ? "background:rgba(16,185,129,.15);color:#10b981" : "background:rgba(245,158,11,.15);color:#f59e0b", "Operating Mode Changed", `Mode diubah ke ${targetMode}`);
     } catch (e) {
+      console.error("setOperatingMode error:", e);
       showToast("Error mode: " + e.message);
     }
   };
@@ -3241,7 +3308,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     const txObj = espRes.transaction || {};
     const isVerified = Boolean(espRes.verified || txObj.verified);
     const statusCat = espRes.statusCategory || txObj.statusCategory || (isVerified ? 'verified' : 'completed_unverified');
-    const opMode = window.deviceManager ? window.deviceManager.getOperatingMode() : 'AUTO';
+    const opMode = (window.deviceManager && typeof window.deviceManager.getOperatingMode === 'function')
+      ? window.deviceManager.getOperatingMode()
+      : ((window.deviceManager && window.deviceManager.operatingMode) || 'AUTO');
 
     state.excelLogs.push({
       datetime: dateTimeStr,
@@ -5393,16 +5462,24 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     // Phase 2: Inisialisasi Mode Operasional & Sinkronisasi Pemetaan Mekanisme
     try {
       if (window.deviceManager) {
-        window.deviceManager.onStatusChange((event) => {
-          if (event.type === 'transaction_update' && typeof updateTransactionTelemetryUI === 'function') {
-            updateTransactionTelemetryUI(event.transaction);
-          }
-        });
-        const currentOpMode = window.deviceManager.getOperatingMode();
+        if (typeof window.deviceManager.onStatusChange === 'function') {
+          window.deviceManager.onStatusChange((event) => {
+            if (event.type === 'transaction_update' && typeof updateTransactionTelemetryUI === 'function') {
+              updateTransactionTelemetryUI(event.transaction);
+            }
+          });
+        }
+        const currentOpMode = (typeof window.deviceManager.getOperatingMode === 'function')
+          ? window.deviceManager.getOperatingMode()
+          : (window.deviceManager.operatingMode || 'AUTO');
+
         if (typeof window.setOperatingMode === 'function') {
           window.setOperatingMode(currentOpMode);
         }
-        const savedMap = window.deviceManager.getLegacyMechanismMap();
+        const savedMap = (typeof window.deviceManager.getLegacyMechanismMap === 'function')
+          ? window.deviceManager.getLegacyMechanismMap()
+          : { merah: 'servo', kuning: 'servo', biru: 'arm' };
+
         if ($('map-color-merah')) $('map-color-merah').value = savedMap.merah || 'servo';
         if ($('map-color-kuning')) $('map-color-kuning').value = savedMap.kuning || 'servo';
         if ($('map-color-biru')) $('map-color-biru').value = savedMap.biru || 'arm';
