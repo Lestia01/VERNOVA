@@ -24,6 +24,7 @@
 #define PIN_SERVO_FLAP 18
 #define PIN_SERVO_ARM  19
 #define PIN_LED_STATUS 2
+#define PIN_SENSOR_VERIFY 21 // Pin sensor optik / proximity verifikasi fisik (Active LOW / Pull-up)
 
 Servo servoFlap;
 Servo servoArm;
@@ -33,12 +34,25 @@ BLECharacteristic *pTxCharacteristic = NULL;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 String currentMode = "Servo";
+int lastSensorState = -1;
+
+void notifyBLE(String message) {
+  if (deviceConnected && pTxCharacteristic) {
+    pTxCharacteristic->setValue(message.c_str());
+    pTxCharacteristic->notify();
+    delay(20);
+    Serial.print("[BLE TX] ");
+    Serial.print(message);
+    if (!message.endsWith("\n")) Serial.println();
+  }
+}
 
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
       digitalWrite(PIN_LED_STATUS, HIGH);
       Serial.println("[BLE] Web Client Connected!");
+      notifyBLE("STATUS:READY\n");
     };
 
     void onDisconnect(BLEServer* pServer) {
@@ -93,40 +107,45 @@ class MyCallbacks: public BLECharacteristicCallbacks {
           if (rxValue.indexOf("arm") != -1 || rxValue.indexOf("Arm") != -1) currentMode = "Arm";
           else currentMode = "Servo";
 
-          if (deviceConnected && pTxCharacteristic) {
-            String ack = "{\"ok\":true,\"ack\":\"mechanism\",\"mechanism\":\"" + String(currentMode == "Arm" ? "arm" : "servo") + "\",\"status\":\"READY\",\"ready\":true,\"txId\":\"" + txId + "\"}\n";
-            pTxCharacteristic->setValue(ack.c_str());
-            pTxCharacteristic->notify();
-          }
+          notifyBLE("STATUS:READY\n");
+          String ack = "{\"ok\":true,\"ack\":\"mechanism\",\"mechanism\":\"" + String(currentMode == "Arm" ? "arm" : "servo") + "\",\"status\":\"READY\",\"ready\":true,\"txId\":\"" + txId + "\"}\n";
+          notifyBLE(ack);
         } else if (color != "") {
           executeSort(color);
-          if (deviceConnected && pTxCharacteristic) {
+          
+          // 1. Notifikasi penyelesaian pergerakan servo
+          notifyBLE("STATUS:SERVO_DONE\n");
+
+          // 2. Evaluasi bukti sensor fisik
+          int sensorVal = digitalRead(PIN_SENSOR_VERIFY);
+          bool isObjectPresent = (sensorVal == LOW);
+
+          if (isObjectPresent) {
+            notifyBLE("SENSOR:OBJECT_PRESENT\n");
+            String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + color + "\",\"status\":\"COMPLETED\",\"sensorVerified\":true,\"id\":\"" + txId + "\"}\n";
+            notifyBLE(ack);
+          } else {
+            notifyBLE("SENSOR:OBJECT_ABSENT\n");
+            notifyBLE("STATUS:COMPLETED_UNVERIFIED\n");
             String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + color + "\",\"status\":\"COMPLETED\",\"sensorVerified\":false,\"id\":\"" + txId + "\"}\n";
-            pTxCharacteristic->setValue(ack.c_str());
-            pTxCharacteristic->notify();
+            notifyBLE(ack);
           }
         } else if (rxValue.indexOf("arm") != -1 || rxValue.indexOf("Arm") != -1) {
           currentMode = "Arm";
-          if (deviceConnected && pTxCharacteristic) {
-            String ack = "{\"ok\":true,\"ack\":\"mode\",\"mode\":\"Arm\",\"status\":\"READY\"}\n";
-            pTxCharacteristic->setValue(ack.c_str());
-            pTxCharacteristic->notify();
-          }
+          notifyBLE("STATUS:READY\n");
+          String ack = "{\"ok\":true,\"ack\":\"mode\",\"mode\":\"Arm\",\"status\":\"READY\"}\n";
+          notifyBLE(ack);
         } else if (rxValue.indexOf("servo") != -1 || rxValue.indexOf("Servo") != -1) {
           currentMode = "Servo";
-          if (deviceConnected && pTxCharacteristic) {
-            String ack = "{\"ok\":true,\"ack\":\"mode\",\"mode\":\"Servo\",\"status\":\"READY\"}\n";
-            pTxCharacteristic->setValue(ack.c_str());
-            pTxCharacteristic->notify();
-          }
+          notifyBLE("STATUS:READY\n");
+          String ack = "{\"ok\":true,\"ack\":\"mode\",\"mode\":\"Servo\",\"status\":\"READY\"}\n";
+          notifyBLE(ack);
         } else if (rxValue.indexOf("stop") != -1) {
           servoFlap.write(90);
           servoArm.write(20);
-          if (deviceConnected && pTxCharacteristic) {
-            String ack = "{\"ok\":true,\"ack\":\"stop\",\"status\":\"STOPPED\"}\n";
-            pTxCharacteristic->setValue(ack.c_str());
-            pTxCharacteristic->notify();
-          }
+          notifyBLE("STATUS:STOPPED\n");
+          String ack = "{\"ok\":true,\"ack\":\"stop\",\"status\":\"STOPPED\"}\n";
+          notifyBLE(ack);
         }
       }
     }
@@ -135,6 +154,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_LED_STATUS, OUTPUT);
+  pinMode(PIN_SENSOR_VERIFY, INPUT_PULLUP);
   digitalWrite(PIN_LED_STATUS, LOW);
 
   ESP32PWM::allocateTimer(0);
@@ -182,5 +202,19 @@ void loop() {
   if (deviceConnected && !oldDeviceConnected) {
     oldDeviceConnected = deviceConnected;
   }
+
+  // Notifikasi real-time jika sensor fisik mendeteksi perubahan status objek
+  if (deviceConnected) {
+    int currentSensor = digitalRead(PIN_SENSOR_VERIFY);
+    if (currentSensor != lastSensorState) {
+      lastSensorState = currentSensor;
+      if (currentSensor == LOW) {
+        notifyBLE("SENSOR:OBJECT_PRESENT\n");
+      } else {
+        notifyBLE("SENSOR:OBJECT_ABSENT\n");
+      }
+    }
+  }
+
   delay(10);
 }

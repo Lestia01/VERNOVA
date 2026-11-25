@@ -427,9 +427,9 @@
       return () => this._listeners.delete(fn);
     }
 
-    _notify(state, detail = null) {
+    _notify(state, detail = null, extra = {}) {
       this.status = state;
-      const payload = {
+      const payload = Object.assign({
         deviceType: this.deviceType,
         connectionType: this.connectionType,
         status: this.status,
@@ -437,7 +437,7 @@
         detail,
         telemetry: this.lastTelemetry,
         timestamp: new Date().toISOString()
-      };
+      }, extra);
       this._listeners.forEach(fn => {
         try { fn(payload); } catch (e) { console.error(`[${this.deviceType}Adapter] Listener error:`, e); }
       });
@@ -782,6 +782,16 @@
       this.rxCharacteristic = null;
       this.txCharacteristic = null;
       this.targetDeviceName = config.deviceName || 'VERNOVA-ESP32';
+      this.sensorState = {
+        state: 'IDLE',
+        objectPresent: false,
+        lastUpdated: null,
+        raw: ''
+      };
+      this._sortWaiters = new Map();
+      this._mechanismWaiters = new Map();
+      this._activeSortWaiter = null;
+
       if (this.simulationMode) {
         this._initSimulatedTelemetry();
       }
@@ -875,15 +885,211 @@
       }
     }
 
-    _handleIncomingData(text) {
-      try {
-        const json = JSON.parse(text);
-        if (json && json.status) {
-          this.lastAck = json;
-        }
-      } catch (e) {
-        // Teks biasa
+    getSensorState() {
+      return Object.assign({}, this.sensorState);
+    }
+
+    _handleIncomingData(rawText) {
+      if (rawText === undefined || rawText === null) return;
+      const text = String(rawText);
+      console.log('[BLE RX]', text.trim());
+
+      const lines = text.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
+      for (const line of lines) {
+        this._dispatchIncomingLine(line);
       }
+    }
+
+    receiveMockData(text) {
+      this._handleIncomingData(text);
+    }
+
+    _updateSensorState(state, objectPresent, raw) {
+      this.sensorState = {
+        state,
+        objectPresent: Boolean(objectPresent),
+        timestamp: new Date().toISOString(),
+        raw: String(raw || '')
+      };
+      this._notify(
+        this.status,
+        objectPresent ? 'Sensor Fisik: Objek Terdeteksi' : 'Sensor Fisik: Objek Belum/Tidak Terdeteksi',
+        {
+          type: 'sensor_telemetry',
+          sensorState: Object.assign({}, this.sensorState)
+        }
+      );
+    }
+
+    _dispatchIncomingLine(line) {
+      // 1. Coba parsing JSON terlebih dahulu jika berformat { ... }
+      if (line.startsWith('{') && line.endsWith('}')) {
+        try {
+          const json = JSON.parse(line);
+          this.lastAck = json;
+          if (json.status && json.status === 'READY') {
+            this.status = CONNECTION_STATES.READY;
+          }
+
+          if (json.sensor === 'present' || json.sensor === 'OBJECT_PRESENT' || json.objectPresent === true) {
+            this._updateSensorState('OBJECT_PRESENT', true, line);
+            if (this._activeSortWaiter) {
+              this._activeSortWaiter.triggerSensorPresent();
+            }
+          } else if (json.sensor === 'absent' || json.sensor === 'OBJECT_ABSENT' || json.objectPresent === false) {
+            this._updateSensorState('OBJECT_ABSENT', false, line);
+          }
+
+          if (json.ack === 'mechanism' || json.cmd === 'mechanism' || json.mechanism) {
+            this._resolveMechanismWaiter(json.txId || json.id, json);
+          }
+
+          if (json.ack === 'sort' || json.cmd === 'sort' || json.status === 'COMPLETED' || json.status === 'VERIFIED') {
+            const isVerified = Boolean(json.sensorVerified || json.verified || (this.sensorState && this.sensorState.objectPresent));
+            this._resolveSortWaiter(json.id || json.txId, {
+              ok: json.ok !== false,
+              status: isVerified ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
+              sensorVerified: isVerified,
+              verified: isVerified,
+              raw: json
+            });
+          }
+          return;
+        } catch (e) {
+          // Bukan JSON, lanjutkan ke parser teks protokol
+        }
+      }
+
+      // 2. Pemrosesan Pesan Teks Protokol ESP32 BLE
+      const upper = line.toUpperCase();
+
+      if (upper.includes('SENSOR:OBJECT_PRESENT') || upper === 'SENSOR:PRESENT') {
+        this._updateSensorState('OBJECT_PRESENT', true, line);
+        if (this._activeSortWaiter) {
+          this._activeSortWaiter.triggerSensorPresent();
+        }
+      } else if (upper.includes('SENSOR:OBJECT_ABSENT') || upper === 'SENSOR:ABSENT') {
+        this._updateSensorState('OBJECT_ABSENT', false, line);
+        if (this._activeSortWaiter && !this._activeSortWaiter.sensorVerified) {
+          this._activeSortWaiter.sensorVerified = false;
+        }
+      } else if (upper.includes('STATUS:SERVO_DONE')) {
+        if (this._activeSortWaiter) {
+          this._activeSortWaiter.triggerServoDone();
+        }
+      } else if (upper.includes('STATUS:COMPLETED_UNVERIFIED')) {
+        if (this._activeSortWaiter) {
+          this._activeSortWaiter.resolve({
+            ok: true,
+            status: 'COMPLETED_UNVERIFIED',
+            sensorVerified: false,
+            verified: false,
+            raw: line
+          });
+        }
+      } else if (upper.includes('STATUS:READY') || upper === 'READY') {
+        this.status = CONNECTION_STATES.READY;
+        this._resolveMechanismWaiter(null, { ok: true, status: 'READY', ready: true });
+      } else if (upper.includes('STATUS:STOPPED')) {
+        this.status = 'STOPPED';
+      }
+    }
+
+    _resolveSortWaiter(txId, result) {
+      if (txId && this._sortWaiters.has(txId)) {
+        const waiter = this._sortWaiters.get(txId);
+        waiter.resolve(result);
+        return;
+      }
+      if (this._activeSortWaiter) {
+        this._activeSortWaiter.resolve(result);
+      }
+    }
+
+    _resolveMechanismWaiter(txId, result) {
+      if (txId && this._mechanismWaiters.has(txId)) {
+        const waiter = this._mechanismWaiters.get(txId);
+        waiter.resolve(result);
+        this._mechanismWaiters.delete(txId);
+        return;
+      }
+      for (const [key, waiter] of this._mechanismWaiters.entries()) {
+        waiter.resolve(result);
+        this._mechanismWaiters.delete(key);
+      }
+    }
+
+    _waitForSortResponse(commandId, timeoutMs = 8000) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        let graceTimer = null;
+
+        const waiter = {
+          commandId,
+          sensorVerified: Boolean(this.sensorState && this.sensorState.objectPresent),
+          servoDone: false,
+          resolve: (result) => {
+            if (settled) return;
+            settled = true;
+            if (graceTimer) clearTimeout(graceTimer);
+            clearTimeout(timeoutId);
+            this._activeSortWaiter = null;
+            if (commandId) this._sortWaiters.delete(commandId);
+            resolve(result);
+          },
+          reject: (err) => {
+            if (settled) return;
+            settled = true;
+            if (graceTimer) clearTimeout(graceTimer);
+            clearTimeout(timeoutId);
+            this._activeSortWaiter = null;
+            if (commandId) this._sortWaiters.delete(commandId);
+            reject(err);
+          },
+          triggerServoDone: () => {
+            waiter.servoDone = true;
+            if (waiter.sensorVerified) {
+              waiter.resolve({ ok: true, sensorVerified: true, verified: true, status: 'VERIFIED' });
+            } else {
+              if (graceTimer) clearTimeout(graceTimer);
+              graceTimer = setTimeout(() => {
+                waiter.resolve({
+                  ok: true,
+                  sensorVerified: Boolean(waiter.sensorVerified),
+                  verified: Boolean(waiter.sensorVerified),
+                  status: waiter.sensorVerified ? 'VERIFIED' : 'COMPLETED_UNVERIFIED'
+                });
+              }, 300);
+            }
+          },
+          triggerSensorPresent: () => {
+            waiter.sensorVerified = true;
+            if (waiter.servoDone) {
+              waiter.resolve({ ok: true, sensorVerified: true, verified: true, status: 'VERIFIED' });
+            }
+          }
+        };
+
+        const timeoutId = setTimeout(() => {
+          if (waiter.servoDone) {
+            waiter.resolve({
+              ok: true,
+              sensorVerified: Boolean(waiter.sensorVerified),
+              verified: Boolean(waiter.sensorVerified),
+              status: waiter.sensorVerified ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
+              timeout: true
+            });
+          } else {
+            waiter.reject(new Error(`Timeout menunggu respons ESP32 BLE (${timeoutMs}ms)`));
+          }
+        }, timeoutMs);
+
+        waiter.timeoutId = timeoutId;
+        this._activeSortWaiter = waiter;
+        if (commandId) {
+          this._sortWaiters.set(commandId, waiter);
+        }
+      });
     }
 
     async disconnect() {
@@ -899,6 +1105,7 @@
     }
 
     async _writeBLE(payloadString) {
+      console.log('[BLE TX]', payloadString);
       if (this.simulationMode) return true;
       if (!this.rxCharacteristic) throw new Error('Karakteristik BLE RX tidak siap.');
       const encoder = new TextEncoder();
@@ -923,11 +1130,14 @@
       }
 
       const mode = params.mode && VALID_MODES.includes(params.mode) ? params.mode : 'Servo';
-      const commandId = params.commandId || `CMD_BLE_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const commandId = params.commandId || params.transactionId || `CMD_BLE_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const startTime = Date.now();
+      const timeoutMs = Number(params.timeoutMs) || 8000;
 
       if (this.simulationMode) {
         this._notify(CONNECTION_STATES.BUSY, `[Simulasi BLE] Sortir ${color}`);
+        // Verifikasi fisik sensor hanya valid bila ada bukti fisik aktual (atau opsi simulasi sensor aktif)
+        const simulateSensor = Boolean(params.simulateSensorVerification || (this.sensorState && this.sensorState.objectPresent));
         await new Promise(r => setTimeout(r, 260));
         const durationMs = Date.now() - startTime;
         const result = {
@@ -936,10 +1146,12 @@
           commandId,
           color,
           mode,
-          status: 'COMPLETED',
+          status: simulateSensor ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
+          sensorVerified: simulateSensor,
+          verified: simulateSensor,
           executionStatus: 'simulated_esp32_ble',
           durationMs,
-          message: `Simulasi BLE ${color} selesai.`
+          message: `Simulasi BLE ${color} selesai (${simulateSensor ? 'TERVERIFIKASI FISIK' : 'BELUM TERVERIFIKASI FISIK'}).`
         };
         this.lastAck = result;
         this._notify(CONNECTION_STATES.SIMULATED, `[Simulasi BLE] Selesai ${color}`);
@@ -949,19 +1161,33 @@
       this._notify(CONNECTION_STATES.BUSY, `Mengirim sortir BLE ${color}...`);
       try {
         const payload = JSON.stringify({ cmd: 'sort', color, mode, id: commandId });
+        
+        // Buat waiter untuk menunggu respons ACK / sensor fisik dari ESP32
+        const sortPromise = this._waitForSortResponse(commandId, timeoutMs);
+        
         await this._writeBLE(payload);
+        
+        const response = await sortPromise;
         const durationMs = Date.now() - startTime;
+        const isVerified = Boolean(response.sensorVerified || response.verified);
+
         const result = {
           ok: true,
           commandId,
           color,
           mode,
-          status: 'COMMAND_RECEIVED',
+          status: isVerified ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
+          sensorVerified: isVerified,
+          verified: isVerified,
           executionStatus: 'confirmed_esp32_ble',
-          durationMs
+          durationMs,
+          rawResponse: response
         };
         this.lastAck = result;
-        this._notify(CONNECTION_STATES.CONNECTED, `Sortir BLE ${color} terkirim (${durationMs}ms)`);
+        this._notify(
+          CONNECTION_STATES.CONNECTED,
+          `Sortir BLE ${color} selesai (${isVerified ? 'TERVERIFIKASI FISIK' : 'BELUM TERVERIFIKASI FISIK'}) [${durationMs}ms]`
+        );
         return result;
       } catch (err) {
         const durationMs = Date.now() - startTime;
@@ -1521,8 +1747,24 @@
       }
 
       this._adapterUnsubscribe = this.activeAdapter.onStatusChange((event) => {
+        if (event && event.type === 'sensor_telemetry' && event.sensorState) {
+          this.lastSensorState = event.sensorState;
+          if (this.currentTransaction && (this.currentTransaction.state === TRANSACTION_STATES.SORTING || this.currentTransaction.state === TRANSACTION_STATES.AWAITING_CLASS_ACK)) {
+            if (event.sensorState.objectPresent) {
+              this.currentTransaction.sensorVerified = true;
+              this.currentTransaction.verified = true;
+            }
+          }
+        }
         this._notifyManagerListeners(event);
       });
+    }
+
+    getSensorState() {
+      if (this.activeAdapter && typeof this.activeAdapter.getSensorState === 'function') {
+        return this.activeAdapter.getSensorState();
+      }
+      return this.lastSensorState || { state: 'IDLE', objectPresent: false, timestamp: null };
     }
 
     onStatusChange(fn) {
@@ -1696,13 +1938,20 @@
         tx.durationMs = Date.now() - startTime;
 
         // TAHAP 3: Verifikasi Sensor Fisik
-        const hasSensorVerification = Boolean(sortResp.sensorVerified || sortResp.verified);
+        const hasSensorVerification = Boolean(
+          sortResp.sensorVerified === true ||
+          sortResp.verified === true ||
+          tx.sensorVerified === true ||
+          (this.activeAdapter && this.activeAdapter.sensorState && this.activeAdapter.sensorState.objectPresent && this.activeAdapter.sensorState.lastTxId === txId)
+        );
         if (hasSensorVerification) {
           tx.state = TRANSACTION_STATES.VERIFYING;
           tx.verified = true;
+          tx.sensorVerified = true;
           tx.statusCategory = STATUS_CATEGORIES.VERIFIED;
         } else {
           tx.verified = false;
+          tx.sensorVerified = false;
           tx.statusCategory = STATUS_CATEGORIES.COMPLETED_UNVERIFIED;
         }
 
