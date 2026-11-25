@@ -739,9 +739,11 @@
     }
 
     async sortObject(color, mechanism, options = {}) {
+      const mode = String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo';
       return await this.sendSortingCommand({
         color,
-        mode: String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo',
+        mode,
+        canonicalClass: options.detectedClass || `${color}_${mode.toLowerCase()}`,
         commandId: options.transactionId,
         ...options
       });
@@ -963,7 +965,40 @@
       // 2. Pemrosesan Pesan Teks Protokol ESP32 BLE
       const upper = line.toUpperCase();
 
-      if (upper.includes('SENSOR:OBJECT_PRESENT') || upper === 'SENSOR:PRESENT') {
+      if (upper.includes('STATUS:OBJECT_DETECTED') || upper === 'OBJECT_DETECTED') {
+        this.armObjectDetected = true;
+        this._updateSensorState('OBJECT_DETECTED', true, line);
+        this._notify(this.status, 'Sensor ARM: Objek Terdeteksi (GPIO 34)', { type: 'stage_update', stage: 'OBJECT_DETECTED' });
+        if (this._activeSortWaiter) {
+          this._activeSortWaiter.triggerObjectDetected();
+        }
+      } else if (upper.includes('STATUS:BELT_STOPPED') || upper === 'BELT_STOPPED') {
+        this.beltRunning = false;
+        this._notify(this.status, 'Conveyor Belt: Berhenti', { type: 'stage_update', stage: 'BELT_STOPPED', beltRunning: false });
+        if (this._activeSortWaiter) {
+          this._activeSortWaiter.triggerBeltStopped();
+        }
+      } else if (upper.includes('STATUS:ARM_WORKING') || upper === 'ARM_WORKING') {
+        this.armWorking = true;
+        this._notify(this.status, 'Lengan Robotik: Memindahkan Objek', { type: 'stage_update', stage: 'ARM_WORKING' });
+        if (this._activeSortWaiter) {
+          this._activeSortWaiter.triggerArmWorking();
+        }
+      } else if (upper.includes('STATUS:TARGET_DETECTED') || upper === 'TARGET_DETECTED') {
+        this.targetDetected = true;
+        this._updateSensorState('TARGET_DETECTED', true, line);
+        this._notify(this.status, 'Sensor Tujuan: Objek Terkonfirmasi', { type: 'stage_update', stage: 'TARGET_DETECTED' });
+        if (this._activeSortWaiter) {
+          this._activeSortWaiter.triggerTargetDetected();
+        }
+      } else if (upper.includes('STATUS:BELT_RESUMED') || upper === 'BELT_RESUMED') {
+        this.beltRunning = true;
+        this.armObjectDetected = false;
+        this._notify(this.status, 'Conveyor Belt: Berjalan Kembali', { type: 'stage_update', stage: 'BELT_RESUMED', beltRunning: true });
+        if (this._activeSortWaiter) {
+          this._activeSortWaiter.triggerBeltResumed();
+        }
+      } else if (upper.includes('SENSOR:OBJECT_PRESENT') || upper === 'SENSOR:PRESENT') {
         this._updateSensorState('OBJECT_PRESENT', true, line);
         if (this._activeSortWaiter) {
           this._activeSortWaiter.triggerSensorPresent();
@@ -1028,6 +1063,11 @@
           commandId,
           sensorVerified: Boolean(this.sensorState && this.sensorState.objectPresent),
           servoDone: false,
+          objectDetected: false,
+          beltStopped: false,
+          armWorking: false,
+          targetDetected: false,
+          beltResumed: false,
           resolve: (result) => {
             if (settled) return;
             settled = true;
@@ -1046,37 +1086,75 @@
             if (commandId) this._sortWaiters.delete(commandId);
             reject(err);
           },
+          triggerObjectDetected: () => {
+            waiter.objectDetected = true;
+          },
+          triggerBeltStopped: () => {
+            waiter.beltStopped = true;
+          },
+          triggerArmWorking: () => {
+            waiter.armWorking = true;
+          },
+          triggerTargetDetected: () => {
+            waiter.targetDetected = true;
+            waiter.sensorVerified = true;
+          },
           triggerServoDone: () => {
             waiter.servoDone = true;
-            if (waiter.sensorVerified) {
+            if (waiter.targetDetected || waiter.sensorVerified) {
               waiter.resolve({ ok: true, sensorVerified: true, verified: true, status: 'VERIFIED' });
             } else {
               if (graceTimer) clearTimeout(graceTimer);
               graceTimer = setTimeout(() => {
+                const isV = Boolean(waiter.targetDetected || waiter.sensorVerified);
                 waiter.resolve({
                   ok: true,
-                  sensorVerified: Boolean(waiter.sensorVerified),
-                  verified: Boolean(waiter.sensorVerified),
-                  status: waiter.sensorVerified ? 'VERIFIED' : 'COMPLETED_UNVERIFIED'
+                  sensorVerified: isV,
+                  verified: isV,
+                  status: isV ? 'VERIFIED' : 'COMPLETED_UNVERIFIED'
                 });
-              }, 300);
+              }, 400);
             }
           },
           triggerSensorPresent: () => {
             waiter.sensorVerified = true;
+            waiter.targetDetected = true;
             if (waiter.servoDone) {
               waiter.resolve({ ok: true, sensorVerified: true, verified: true, status: 'VERIFIED' });
+            }
+          },
+          triggerBeltResumed: () => {
+            waiter.beltResumed = true;
+            // Jika sensor tujuan terdeteksi -> VERIFIED
+            // Jika sensor tujuan tidak terdeteksi -> COMPLETED_UNVERIFIED
+            if (waiter.targetDetected || waiter.sensorVerified) {
+              waiter.resolve({
+                ok: true,
+                status: 'VERIFIED',
+                sensorVerified: true,
+                verified: true,
+                stage: 'BELT_RESUMED'
+              });
+            } else {
+              waiter.resolve({
+                ok: true,
+                status: 'COMPLETED_UNVERIFIED',
+                sensorVerified: false,
+                verified: false,
+                stage: 'BELT_RESUMED'
+              });
             }
           }
         };
 
         const timeoutId = setTimeout(() => {
-          if (waiter.servoDone) {
+          if (waiter.servoDone || waiter.beltResumed) {
+            const isV = Boolean(waiter.targetDetected || waiter.sensorVerified);
             waiter.resolve({
               ok: true,
-              sensorVerified: Boolean(waiter.sensorVerified),
-              verified: Boolean(waiter.sensorVerified),
-              status: waiter.sensorVerified ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
+              sensorVerified: isV,
+              verified: isV,
+              status: isV ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
               timeout: true
             });
           } else {
@@ -1136,6 +1214,45 @@
 
       if (this.simulationMode) {
         this._notify(CONNECTION_STATES.BUSY, `[Simulasi BLE] Sortir ${color}`);
+
+        // Simulasi tahapan konveyor dan ARM jika mode ARM
+        if (mode === 'Arm' || params.simulateArmCycle) {
+          this._notify(this.status, 'Sensor ARM: Objek Terdeteksi (GPIO 34)', { type: 'stage_update', stage: 'OBJECT_DETECTED' });
+          this._notify(this.status, 'Conveyor Belt: Berhenti', { type: 'stage_update', stage: 'BELT_STOPPED', beltRunning: false });
+          await new Promise(r => setTimeout(r, 60));
+
+          this._notify(this.status, 'Lengan Robotik: Memindahkan Objek', { type: 'stage_update', stage: 'ARM_WORKING' });
+          await new Promise(r => setTimeout(r, 80));
+
+          const simulateTarget = params.simulateTargetDetected !== false && Boolean(params.simulateSensorVerification || (this.sensorState && this.sensorState.objectPresent));
+          if (simulateTarget) {
+            this._updateSensorState('TARGET_DETECTED', true, 'SIM_TARGET_DETECTED');
+            this._notify(this.status, 'Sensor Tujuan: Objek Terkonfirmasi', { type: 'stage_update', stage: 'TARGET_DETECTED' });
+          }
+
+          await new Promise(r => setTimeout(r, 60));
+          this._notify(this.status, 'Conveyor Belt: Berjalan Kembali', { type: 'stage_update', stage: 'BELT_RESUMED', beltRunning: true });
+
+          const durationMs = Date.now() - startTime;
+          const isVerified = Boolean(simulateTarget);
+          const result = {
+            ok: true,
+            simulated: true,
+            commandId,
+            color,
+            mode,
+            status: isVerified ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
+            sensorVerified: isVerified,
+            verified: isVerified,
+            executionStatus: 'simulated_esp32_ble',
+            durationMs,
+            message: `Simulasi BLE ARM ${color} selesai (${isVerified ? 'TERVERIFIKASI FISIK' : 'BELUM TERVERIFIKASI FISIK'}).`
+          };
+          this.lastAck = result;
+          this._notify(CONNECTION_STATES.SIMULATED, `[Simulasi BLE] Selesai ${color}`);
+          return result;
+        }
+
         // Verifikasi fisik sensor hanya valid bila ada bukti fisik aktual (atau opsi simulasi sensor aktif)
         const simulateSensor = Boolean(params.simulateSensorVerification || (this.sensorState && this.sensorState.objectPresent));
         await new Promise(r => setTimeout(r, 260));
@@ -1160,7 +1277,8 @@
 
       this._notify(CONNECTION_STATES.BUSY, `Mengirim sortir BLE ${color}...`);
       try {
-        const payload = JSON.stringify({ cmd: 'sort', color, mode, id: commandId });
+        const canonicalClass = params.canonicalClass || (color ? `${color}_${mode.toLowerCase()}` : '');
+        const payload = JSON.stringify({ cmd: 'sort', color, mode, class: canonicalClass, id: commandId });
         
         // Buat waiter untuk menunggu respons ACK / sensor fisik dari ESP32
         const sortPromise = this._waitForSortResponse(commandId, timeoutMs);
@@ -1255,9 +1373,11 @@
     }
 
     async sortObject(color, mechanism, options = {}) {
+      const mode = String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo';
       return await this.sendSortingCommand({
         color,
-        mode: String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo',
+        mode,
+        canonicalClass: options.detectedClass || `${color}_${mode.toLowerCase()}`,
         commandId: options.transactionId,
         ...options
       });
@@ -1532,9 +1652,11 @@
     }
 
     async sortObject(color, mechanism, options = {}) {
+      const mode = String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo';
       return await this.sendSortingCommand({
         color,
-        mode: String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo',
+        mode,
+        canonicalClass: options.detectedClass || `${color}_${mode.toLowerCase()}`,
         commandId: options.transactionId,
         ...options
       });

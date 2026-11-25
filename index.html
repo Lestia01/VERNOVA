@@ -2429,6 +2429,37 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         }
       }
     }
+
+    // Pembaruan Real-Time Tahapan Siklus Conveyor & ARM
+    if (ev && ev.type === 'stage_update' && ev.stage) {
+      const stageMech = $('tx-stage-mech');
+      const stageSort = $('tx-stage-sort');
+      const stageVerif = $('tx-stage-verif');
+      
+      if (ev.stage === 'OBJECT_DETECTED') {
+        if (stageSort) {
+          stageSort.className = 'pill yellow';
+          stageSort.innerText = '2. Objek: Terdeteksi di Area ARM (GPIO 34)';
+        }
+        try { logActivity("fas fa-crosshairs", "background:rgba(234,179,8,.15);color:#eab308", "Objek Terdeteksi", "Sensor ARM GPIO 34 mendeteksi objek, belt dihentikan"); } catch (e) {}
+      } else if (ev.stage === 'BELT_STOPPED') {
+        try { logActivity("fas fa-pause", "background:rgba(239,68,68,.15);color:#ef4444", "Belt Berhenti", "Conveyor belt berhenti saat objek berada di area ARM"); } catch (e) {}
+      } else if (ev.stage === 'ARM_WORKING') {
+        if (stageMech) {
+          stageMech.className = 'pill yellow animate-pulse';
+          stageMech.innerText = '1. Mekanisme: ARM Memindahkan Objek...';
+        }
+        try { logActivity("fas fa-robot", "background:rgba(99,102,241,.15);color:#6366f1", "ARM Bekerja", "Lengan robotik memindahkan objek menuju jalur/wadah warna"); } catch (e) {}
+      } else if (ev.stage === 'TARGET_DETECTED') {
+        if (stageVerif) {
+          stageVerif.className = 'pill green';
+          stageVerif.innerText = '3. Sensor: Objek di Wadah Tujuan (VERIFIED)';
+        }
+        try { logActivity("fas fa-check-double", "background:rgba(34,197,94,.15);color:#22c55e", "Target Terdeteksi", "Sensor tujuan warna mengonfirmasi objek di wadah sortir"); } catch (e) {}
+      } else if (ev.stage === 'BELT_RESUMED') {
+        try { logActivity("fas fa-play", "background:rgba(59,130,246,.15);color:#3b82f6", "Belt Berjalan", "Sensor ARM GPIO 34 clear, conveyor belt berjalan kembali"); } catch (e) {}
+      }
+    }
   }
 
   /* Admin Security Guard: Hanya admin terautentikasi yang dapat membuka & mengonfigurasi perangkat */

@@ -21,10 +21,22 @@
 #define CHARACTERISTIC_UUID_RX "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 #define CHARACTERISTIC_UUID_TX "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
-#define PIN_SERVO_FLAP 18
-#define PIN_SERVO_ARM  19
-#define PIN_LED_STATUS 2
-#define PIN_SENSOR_VERIFY 21 // Pin sensor optik / proximity verifikasi fisik (Active LOW / Pull-up)
+#define PIN_SERVO_FLAP    18
+#define PIN_SERVO_ARM     19
+#define PIN_LED_STATUS    2
+
+#define PIN_SENSOR_MERAH  14
+#define PIN_SENSOR_BIRU   13
+#define PIN_SENSOR_KUNING 35
+#define PIN_SENSOR_ARM    34
+
+#define PIN_CONVEYOR_BELT 23 // Pin kontrol Motor DC Conveyor Belt (Relay / Driver MOSFET)
+
+// Logika sensor: Active LOW (standar sensor IR proximity pada ESP32)
+#define SENSOR_ACTIVE_ARM     LOW
+#define SENSOR_ACTIVE_MERAH   LOW
+#define SENSOR_ACTIVE_BIRU    LOW
+#define SENSOR_ACTIVE_KUNING  LOW
 
 Servo servoFlap;
 Servo servoArm;
@@ -34,7 +46,24 @@ BLECharacteristic *pTxCharacteristic = NULL;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 String currentMode = "Servo";
-int lastSensorState = -1;
+
+// Status State Machine Kontrol Conveyor & ARM
+enum SortState {
+  STATE_IDLE,
+  STATE_BELT_MOVING,        // Belt berjalan membawa objek menuju area ARM
+  STATE_ARM_EXECUTING,      // ARM memindahkan objek ke jalur tujuan
+  STATE_WAIT_TARGET_SENSOR, // Menunggu sensor warna tujuan (GPIO 14, 35, 13)
+  STATE_WAIT_ARM_CLEAR      // Menunggu sensor ARM (GPIO 34) tidak lagi mendeteksi objek
+};
+
+SortState currentState = STATE_IDLE;
+String activeColor = "";
+String activeMode = "Servo";
+String activeTxId = "";
+unsigned long stateTimer = 0;
+bool targetConfirmed = false;
+bool beltRunning = false;
+int lastArmSensorVal = -1;
 
 void notifyBLE(String message) {
   if (deviceConnected && pTxCharacteristic) {
@@ -44,6 +73,27 @@ void notifyBLE(String message) {
     Serial.print("[BLE TX] ");
     Serial.print(message);
     if (!message.endsWith("\n")) Serial.println();
+  }
+}
+
+bool isSensorArmTriggered() {
+  return digitalRead(PIN_SENSOR_ARM) == SENSOR_ACTIVE_ARM;
+}
+
+bool isTargetSensorTriggered(String color) {
+  if (color == "merah") return digitalRead(PIN_SENSOR_MERAH) == SENSOR_ACTIVE_MERAH;
+  if (color == "kuning") return digitalRead(PIN_SENSOR_KUNING) == SENSOR_ACTIVE_KUNING;
+  if (color == "biru") return digitalRead(PIN_SENSOR_BIRU) == SENSOR_ACTIVE_BIRU;
+  return false;
+}
+
+void setBeltRunning(bool run) {
+  beltRunning = run;
+  digitalWrite(PIN_CONVEYOR_BELT, run ? HIGH : LOW);
+  if (run) {
+    notifyBLE("STATUS:BELT_RESUMED\n");
+  } else {
+    notifyBLE("STATUS:BELT_STOPPED\n");
   }
 }
 
@@ -58,23 +108,39 @@ class MyServerCallbacks: public BLEServerCallbacks {
     void onDisconnect(BLEServer* pServer) {
       deviceConnected = false;
       digitalWrite(PIN_LED_STATUS, LOW);
+      setBeltRunning(false);
+      currentState = STATE_IDLE;
       Serial.println("[BLE] Web Client Disconnected!");
     }
 };
 
-void executeSort(String color) {
-  int flapAngle = 90;
-  if (color == "kuning") flapAngle = 40;
-  else if (color == "biru") flapAngle = 90;
-  else if (color == "merah") flapAngle = 140;
+void startSortingCycle(String color, String mode, String txId) {
+  activeColor = color;
+  activeMode = (mode == "Arm" || mode == "arm") ? "Arm" : "Servo";
+  currentMode = activeMode;
+  activeTxId = txId;
+  targetConfirmed = false;
+  stateTimer = millis();
 
-  servoFlap.write(flapAngle);
-  delay(150);
+  Serial.println("[SORT START] Color: " + activeColor + " | Mode: " + activeMode + " | TX: " + activeTxId);
 
-  if (currentMode == "Arm") {
-    servoArm.write(120);
-    delay(250);
-    servoArm.write(20);
+  if (activeMode == "Arm") {
+    // Mode ARM:
+    // 1. Belt berjalan membawa objek menuju area ARM
+    // 2. Status stage dipancarkan ke website
+    notifyBLE("STAGE:BELT_MOVING\n");
+    setBeltRunning(true);
+    currentState = STATE_BELT_MOVING;
+  } else {
+    // Mode Servo:
+    int flapAngle = 90;
+    if (activeColor == "kuning") flapAngle = 40;
+    else if (activeColor == "biru") flapAngle = 90;
+    else if (activeColor == "merah") flapAngle = 140;
+
+    servoFlap.write(flapAngle);
+    setBeltRunning(true);
+    currentState = STATE_WAIT_TARGET_SENSOR;
   }
 }
 
@@ -89,6 +155,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
 
         // Parsing JSON atau String sederhana
         String color = "";
+        String mode = "";
         String txId = "";
         
         int idIdx = rxValue.indexOf("\"id\":");
@@ -99,9 +166,24 @@ class MyCallbacks: public BLECharacteristicCallbacks {
           if (startQ != -1 && endQ != -1) txId = rxValue.substring(startQ + 1, endQ);
         }
 
-        if (rxValue.indexOf("kuning") != -1) color = "kuning";
-        else if (rxValue.indexOf("biru") != -1) color = "biru";
-        else if (rxValue.indexOf("merah") != -1) color = "merah";
+        // Deteksi 6 kelas orientasi mekanisme
+        if (rxValue.indexOf("merah_arm") != -1) { color = "merah"; mode = "Arm"; }
+        else if (rxValue.indexOf("kuning_arm") != -1) { color = "kuning"; mode = "Arm"; }
+        else if (rxValue.indexOf("biru_arm") != -1) { color = "biru"; mode = "Arm"; }
+        else if (rxValue.indexOf("merah_servo") != -1) { color = "merah"; mode = "Servo"; }
+        else if (rxValue.indexOf("kuning_servo") != -1) { color = "kuning"; mode = "Servo"; }
+        else if (rxValue.indexOf("biru_servo") != -1) { color = "biru"; mode = "Servo"; }
+        else {
+          if (rxValue.indexOf("kuning") != -1) color = "kuning";
+          else if (rxValue.indexOf("biru") != -1) color = "biru";
+          else if (rxValue.indexOf("merah") != -1) color = "merah";
+
+          if (rxValue.indexOf("\"mode\":\"Arm\"") != -1 || rxValue.indexOf("\"mode\":\"arm\"") != -1 || rxValue.indexOf("arm") != -1) {
+            mode = "Arm";
+          } else {
+            mode = currentMode;
+          }
+        }
 
         if (rxValue.indexOf("mechanism") != -1 || rxValue.indexOf("mech") != -1) {
           if (rxValue.indexOf("arm") != -1 || rxValue.indexOf("Arm") != -1) currentMode = "Arm";
@@ -111,25 +193,11 @@ class MyCallbacks: public BLECharacteristicCallbacks {
           String ack = "{\"ok\":true,\"ack\":\"mechanism\",\"mechanism\":\"" + String(currentMode == "Arm" ? "arm" : "servo") + "\",\"status\":\"READY\",\"ready\":true,\"txId\":\"" + txId + "\"}\n";
           notifyBLE(ack);
         } else if (color != "") {
-          executeSort(color);
-          
-          // 1. Notifikasi penyelesaian pergerakan servo
-          notifyBLE("STATUS:SERVO_DONE\n");
-
-          // 2. Evaluasi bukti sensor fisik
-          int sensorVal = digitalRead(PIN_SENSOR_VERIFY);
-          bool isObjectPresent = (sensorVal == LOW);
-
-          if (isObjectPresent) {
-            notifyBLE("SENSOR:OBJECT_PRESENT\n");
-            String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + color + "\",\"status\":\"COMPLETED\",\"sensorVerified\":true,\"id\":\"" + txId + "\"}\n";
-            notifyBLE(ack);
-          } else {
-            notifyBLE("SENSOR:OBJECT_ABSENT\n");
-            notifyBLE("STATUS:COMPLETED_UNVERIFIED\n");
-            String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + color + "\",\"status\":\"COMPLETED\",\"sensorVerified\":false,\"id\":\"" + txId + "\"}\n";
-            notifyBLE(ack);
+          if (currentState != STATE_IDLE) {
+            Serial.println("[WARN] Sistem sedang sibuk memproses objek, perintah diabaikan.");
+            return;
           }
+          startSortingCycle(color, mode, txId);
         } else if (rxValue.indexOf("arm") != -1 || rxValue.indexOf("Arm") != -1) {
           currentMode = "Arm";
           notifyBLE("STATUS:READY\n");
@@ -141,8 +209,10 @@ class MyCallbacks: public BLECharacteristicCallbacks {
           String ack = "{\"ok\":true,\"ack\":\"mode\",\"mode\":\"Servo\",\"status\":\"READY\"}\n";
           notifyBLE(ack);
         } else if (rxValue.indexOf("stop") != -1) {
+          setBeltRunning(false);
           servoFlap.write(90);
           servoArm.write(20);
+          currentState = STATE_IDLE;
           notifyBLE("STATUS:STOPPED\n");
           String ack = "{\"ok\":true,\"ack\":\"stop\",\"status\":\"STOPPED\"}\n";
           notifyBLE(ack);
@@ -151,11 +221,105 @@ class MyCallbacks: public BLECharacteristicCallbacks {
     }
 };
 
+void runStateMachine() {
+  switch (currentState) {
+    case STATE_IDLE:
+      break;
+
+    case STATE_BELT_MOVING:
+      if (activeMode == "Arm") {
+        if (isSensorArmTriggered()) {
+          // Ketika sensor ARM GPIO 34 mendeteksi objek, belt berhenti
+          setBeltRunning(false);
+          notifyBLE("STATUS:OBJECT_DETECTED\n");
+          currentState = STATE_ARM_EXECUTING;
+          stateTimer = millis();
+        } else if (millis() - stateTimer > 15000) {
+          // Timeout keselamatan belt jika objek macet sebelum sensor ARM
+          setBeltRunning(false);
+          notifyBLE("STATUS:TIMEOUT\n");
+          notifyBLE("STATUS:COMPLETED_UNVERIFIED\n");
+          currentState = STATE_IDLE;
+        }
+      } else {
+        // Mode Servo biasa
+        currentState = STATE_WAIT_TARGET_SENSOR;
+        stateTimer = millis();
+      }
+      break;
+
+    case STATE_ARM_EXECUTING:
+      notifyBLE("STATUS:ARM_WORKING\n");
+      // Atur jalur flap pemilah
+      if (activeColor == "kuning") servoFlap.write(40);
+      else if (activeColor == "biru") servoFlap.write(90);
+      else if (activeColor == "merah") servoFlap.write(140);
+      delay(150);
+
+      // ARM menjalankan proses mengambil dan memindahkan objek menuju jalur/wadah
+      servoArm.write(120);
+      delay(250);
+      servoArm.write(20);
+
+      notifyBLE("STATUS:SERVO_DONE\n");
+      currentState = STATE_WAIT_TARGET_SENSOR;
+      stateTimer = millis();
+      break;
+
+    case STATE_WAIT_TARGET_SENSOR:
+      // Sensor warna tujuan: Merah=GPIO 14, Kuning=GPIO 35, Biru=GPIO 13
+      if (isTargetSensorTriggered(activeColor)) {
+        targetConfirmed = true;
+        notifyBLE("STATUS:TARGET_DETECTED\n");
+        notifyBLE("SENSOR:OBJECT_PRESENT\n");
+        currentState = STATE_WAIT_ARM_CLEAR;
+        stateTimer = millis();
+      } else if (millis() - stateTimer > 4000) {
+        targetConfirmed = false;
+        notifyBLE("SENSOR:OBJECT_ABSENT\n");
+        notifyBLE("STATUS:COMPLETED_UNVERIFIED\n");
+        currentState = STATE_WAIT_ARM_CLEAR;
+        stateTimer = millis();
+      }
+      break;
+
+    case STATE_WAIT_ARM_CLEAR:
+      // ATURAN PENGENDALIAN BELT:
+      // - Sensor GPIO 34 mengendalikan kondisi berhenti dan mulai kembali pada belt.
+      // - Jika GPIO 34 masih mendeteksi objek, belt harus tetap berhenti, meskipun sensor warna tujuan sudah mendeteksi objek.
+      // - Jika sensor warna tujuan sudah mendeteksi objek tetapi GPIO 34 masih mendeteksi objek, tunggu sampai GPIO 34 tidak lagi mendeteksi objek sebelum menjalankan belt.
+      // - Jangan menjalankan belt hanya berdasarkan timer atau karena gerakan ARM selesai.
+      if (!isSensorArmTriggered()) {
+        // Objek sudah benar-benar meninggalkan sensor ARM GPIO 34
+        if (targetConfirmed) {
+          String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + activeColor + "\",\"mode\":\"" + activeMode + "\",\"status\":\"VERIFIED\",\"sensorVerified\":true,\"id\":\"" + activeTxId + "\"}\n";
+          notifyBLE(ack);
+        } else {
+          String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + activeColor + "\",\"mode\":\"" + activeMode + "\",\"status\":\"COMPLETED_UNVERIFIED\",\"sensorVerified\":false,\"id\":\"" + activeTxId + "\"}\n";
+          notifyBLE(ack);
+        }
+
+        // Belt baru berjalan kembali ketika sensor ARM GPIO 34 sudah tidak mendeteksi objek
+        setBeltRunning(true);
+        currentState = STATE_IDLE;
+        delay(100);
+      }
+      break;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_LED_STATUS, OUTPUT);
-  pinMode(PIN_SENSOR_VERIFY, INPUT_PULLUP);
+  pinMode(PIN_CONVEYOR_BELT, OUTPUT);
   digitalWrite(PIN_LED_STATUS, LOW);
+  digitalWrite(PIN_CONVEYOR_BELT, LOW);
+
+  // Inisialisasi sensor sesuai karakteristik hardware ESP32
+  pinMode(PIN_SENSOR_MERAH, INPUT_PULLUP);
+  pinMode(PIN_SENSOR_BIRU, INPUT_PULLUP);
+  pinMode(PIN_SENSOR_KUNING, INPUT); // GPIO 35 input-only tanpa internal pullup
+  pinMode(PIN_SENSOR_ARM, INPUT);    // GPIO 34 input-only tanpa internal pullup
 
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
@@ -166,7 +330,7 @@ void setup() {
   servoFlap.write(90);
   servoArm.write(20);
 
-  Serial.println("[VERNOVA] Memulai ESP32 BLE Sorting Server...");
+  Serial.println("[VERNOVA] Memulai ESP32 BLE Sorting Server dengan Kontrol Conveyor & ARM...");
 
   BLEDevice::init("VERNOVA-ESP32");
   pServer = BLEDevice::createServer();
@@ -203,12 +367,15 @@ void loop() {
     oldDeviceConnected = deviceConnected;
   }
 
-  // Notifikasi real-time jika sensor fisik mendeteksi perubahan status objek
-  if (deviceConnected) {
-    int currentSensor = digitalRead(PIN_SENSOR_VERIFY);
-    if (currentSensor != lastSensorState) {
-      lastSensorState = currentSensor;
-      if (currentSensor == LOW) {
+  // Eksekusi State Machine kontrol conveyor belt dan lengan robotik ARM
+  runStateMachine();
+
+  // Pemantauan telemetri sensor ARM ketika standby
+  if (deviceConnected && currentState == STATE_IDLE) {
+    int currentArmVal = isSensorArmTriggered() ? 1 : 0;
+    if (currentArmVal != lastArmSensorVal) {
+      lastArmSensorVal = currentArmVal;
+      if (currentArmVal == 1) {
         notifyBLE("SENSOR:OBJECT_PRESENT\n");
       } else {
         notifyBLE("SENSOR:OBJECT_ABSENT\n");

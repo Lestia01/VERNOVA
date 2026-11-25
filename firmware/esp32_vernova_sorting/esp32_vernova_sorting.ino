@@ -31,9 +31,16 @@ const char* STA_SSID = "";               // Isi SSID router sekolah jika ada
 const char* STA_PASS = "";               // Isi password router sekolah jika ada
 
 // ---------- Konfigurasi Pin Hardware ----------
-#define PIN_SERVO_FLAP 18  // Servo pemilah arah jalur (Bin 1 / 2 / 3)
-#define PIN_SERVO_ARM  19  // Servo lengan pengangkat / penolak
-#define PIN_LED_STATUS 2   // LED indikator onboard ESP32
+#define PIN_SERVO_FLAP    18  // Servo pemilah arah jalur (Bin 1 / 2 / 3)
+#define PIN_SERVO_ARM     19  // Servo lengan pengangkat / penolak
+#define PIN_LED_STATUS    2   // LED indikator onboard ESP32
+
+#define PIN_SENSOR_MERAH  14  // Sensor warna tujuan merah
+#define PIN_SENSOR_BIRU   13  // Sensor warna tujuan biru
+#define PIN_SENSOR_KUNING 35  // Sensor warna tujuan kuning (Input-only)
+#define PIN_SENSOR_ARM    34  // Sensor kehadiran objek area ARM (Input-only)
+
+#define PIN_CONVEYOR_BELT 23  // Kontrol motor conveyor belt (Relay/Driver)
 
 // ---------- Objek & Variabel Global ----------
 WebServer server(80);
