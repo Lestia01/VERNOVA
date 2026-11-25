@@ -465,7 +465,14 @@ html:not(.dark) .jarvis-msg.bot{color:#0f172a;font-weight:500;}
 
         <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-5 mb-5">
           <div class="card p-4 sm:p-5 xl:col-span-2">
-            <h3 class="card-title mb-4"><i class="fas fa-chart-column"></i><span data-i18n="chart.title">Distribusi Penyortiran</span></h3>
+            <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h3 class="card-title"><i class="fas fa-chart-column"></i><span data-i18n="chart.title">Distribusi Penyortiran</span></h3>
+              <div class="flex items-center gap-2 flex-wrap text-[10px]">
+                <span class="pill green font-bold"><i class="fas fa-circle-check"></i> Terverifikasi Fisik: <span id="chart-verified-count">0</span></span>
+                <span class="pill yellow font-bold"><i class="fas fa-clock"></i> Belum Terverifikasi: <span id="chart-unverified-count">0</span></span>
+                <span class="pill gray font-bold">Akurasi Fisik: <span id="chart-success-rate">0.0%</span></span>
+              </div>
+            </div>
             <div class="h-[210px] sm:h-[240px]"><canvas id="sortingChart"></canvas></div>
           </div>
           <div class="card p-4 sm:p-5 flex flex-col justify-center">
@@ -677,7 +684,20 @@ const FB_CONFIG = {
 const FB_PATH = "smart_factory/sorting_line";
 const SYNC_DELAY_MS = 500; // selisih ±0.5 detik mengikuti admin
 
-const state = { lang: 'id', chart: null, chartYMax: 5, sortingData: { kuning: 0, biru: 0, merah: 0, gagal: 0, total: 0 }, exportLogs: [], _delayT: null, _retries: 0 };
+const state = {
+  lang: 'id', chart: null, chartYMax: 5,
+  sortingData: {
+    merah_arm: 0, kuning_arm: 0, biru_arm: 0,
+    merah_servo: 0, kuning_servo: 0, biru_servo: 0,
+    kuning: 0, biru: 0, merah: 0,
+    armTotal: 0, servoTotal: 0,
+    total: 0, totalVerified: 0,
+    unverifiedTotal: 0,
+    unverified: { merah: 0, kuning: 0, biru: 0, arm: 0, servo: 0 },
+    gagal: 0, totalAttempts: 0, verifiedSuccessRate: 0.0, successRateString: '0.0%'
+  },
+  exportLogs: [], _delayT: null, _retries: 0
+};
 const $ = (id) => document.getElementById(id);
 
 // Unified Device Manager & Client Proxy
@@ -824,17 +844,27 @@ function popMetric(id) {
   el.classList.add('pop');
 }
 function updateUIStats() {
-  $('stat-total').innerText = state.sortingData.total;
-  $('stat-kuning').innerText = state.sortingData.kuning;
-  $('stat-biru').innerText = state.sortingData.biru;
-  $('stat-merah').innerText = state.sortingData.merah;
-  const se = $('stat-error'); if (se) se.innerText = state.sortingData.gagal;
+  const set = (id, val) => { const el = $(id); if (el) el.innerText = val; };
+  set('stat-total', state.sortingData.total || 0);
+  set('stat-kuning', state.sortingData.kuning || 0);
+  set('stat-biru', state.sortingData.biru || 0);
+  set('stat-merah', state.sortingData.merah || 0);
+  set('stat-error', state.sortingData.gagal || 0);
+
+  // Sub-metrik dan Pill Header
+  set('stat-sub-unverified', state.sortingData.unverifiedTotal || 0);
+  set('chart-verified-count', state.sortingData.total || 0);
+  set('chart-unverified-count', state.sortingData.unverifiedTotal || 0);
+  set('chart-success-rate', state.sortingData.successRateString || '0.0%');
+
   ['stat-total', 'stat-kuning', 'stat-biru', 'stat-merah', 'stat-error'].forEach(popMetric);
   $('last-sync').innerText = fullTimestamp(new Date());
 }
 
 function chartLabels() {
-  return state.lang === 'id' ? ['Kuning', 'Biru', 'Merah', 'Error'] : ['Yellow', 'Blue', 'Red', 'Error'];
+  return state.lang === 'id'
+    ? ['Merah — Arm', 'Kuning — Arm', 'Biru — Arm', 'Merah — Servo', 'Kuning — Servo', 'Biru — Servo']
+    : ['Red — Arm', 'Yellow — Arm', 'Blue — Arm', 'Red — Servo', 'Yellow — Servo', 'Blue — Servo'];
 }
 function computeYMax(values) {
   const m = Math.max(...values, 1);
@@ -856,17 +886,31 @@ function initChart() {
     data: {
       labels: chartLabels(),
       datasets: [{
-        data: [0, 0, 0, 0],
-        backgroundColor: ['#c69a45', '#2b4b9b', '#b91c1c', '#94a3b8'],
-        borderRadius: 10, borderSkipped: false, maxBarThickness: 64, minBarLength: 2
+        data: [0, 0, 0, 0, 0, 0],
+        backgroundColor: [
+          '#991b1b', // Merah - Arm
+          '#b45309', // Kuning - Arm
+          '#1e3a8a', // Biru - Arm
+          '#ef4444', // Merah - Servo
+          '#eab308', // Kuning - Servo
+          '#3b82f6'  // Biru - Servo
+        ],
+        borderRadius: 10, borderSkipped: false, maxBarThickness: 54, minBarLength: 2
       }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       animation: { duration: 600, easing: 'easeOutQuart' },
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => ` Terverifikasi Fisik: ${ctx.parsed.y} unit`
+          }
+        }
+      },
       scales: {
-        x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { weight: '700', size: 11 } } },
+        x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { weight: '700', size: 10 } } },
         y: { beginAtZero: true, max: 5, grid: { color: 'rgba(148,163,184,.16)' }, ticks: { color: '#94a3b8', precision: 0, font: { size: 11 }, callback: (v) => Number.isInteger(v) ? v : null } }
       }
     }
@@ -874,11 +918,20 @@ function initChart() {
 }
 function updateChart() {
   if (!state.chart) return;
-  const d = [state.sortingData.kuning, state.sortingData.biru, state.sortingData.merah, state.sortingData.gagal];
+  const d = [
+    state.sortingData.merah_arm || 0,
+    state.sortingData.kuning_arm || 0,
+    state.sortingData.biru_arm || 0,
+    state.sortingData.merah_servo || 0,
+    state.sortingData.kuning_servo || 0,
+    state.sortingData.biru_servo || 0
+  ];
   const needed = computeYMax(d);
   if (needed > state.chartYMax) { state.chartYMax = needed; state.chart.options.scales.y.max = needed; }
   const ds = state.chart.data.datasets[0].data;
-  ds[0] = d[0]; ds[1] = d[1]; ds[2] = d[2]; ds[3] = d[3];
+  for (let i = 0; i < 6; i++) {
+    ds[i] = d[i];
+  }
   state.chart.data.labels = chartLabels();
   try { state.chart.update(); } catch (e) { }
 }
@@ -896,12 +949,18 @@ function collectEntries(obj) {
 }
 function renderFromData(data) {
   data = data || {};
-  const count = (obj) => collectEntries(obj).length;
-  state.sortingData = {
-    kuning: count(data.kuning), biru: count(data.biru), merah: count(data.merah),
-    gagal: count(data.gagal),
-    total: count(data.kuning) + count(data.biru) + count(data.merah)
-  };
+  const allEntries = [
+    ...collectEntries(data.kuning),
+    ...collectEntries(data.biru),
+    ...collectEntries(data.merah),
+    ...collectEntries(data.gagal)
+  ];
+
+  if (typeof aggregateSortingDistribution === 'function') {
+    state.sortingData = aggregateSortingDistribution(allEntries);
+  } else if (typeof window.aggregateSortingDistribution === 'function') {
+    state.sortingData = window.aggregateSortingDistribution(allEntries);
+  }
   updateUIStats();
   updateChart();
 

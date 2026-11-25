@@ -29,6 +29,8 @@
     root.CANONICAL_CLASSES = mod.CANONICAL_CLASSES;
     root.CLASS_REGISTRY = mod.CLASS_REGISTRY;
     root.resolveClassAndMechanism = mod.resolveClassAndMechanism;
+    root.classifyTransaction = mod.classifyTransaction;
+    root.aggregateSortingDistribution = mod.aggregateSortingDistribution;
   }
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
@@ -188,6 +190,205 @@
       isMechanismAware: false,
       mappedFromLegacy: true
     };
+  }
+
+  /**
+   * Mengklasifikasikan transaksi ke dalam kategori status fisik:
+   * 1. 'VERIFIED': Perintah dieksekusi DAN sensor fisik mengonfirmasi objek masuk wadah.
+   * 2. 'COMPLETED_UNVERIFIED': Mikrokontroler selesai bergerak, namun TIDAK ada bukti sensor fisik.
+   * 3. 'FAILED': Terjadi kegagalan komunikasi, timeout, atau eksekusi error.
+   */
+  function classifyTransaction(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+
+    // 1. Cek bukti kegagalan (FAILED / ERROR)
+    const isErr = Boolean(
+      entry.sortResult === 'error' ||
+      entry.executionStatus === 'failed' ||
+      entry.statusCategory === 'failed' ||
+      entry.statusCategory === 'timeout' ||
+      entry.commandStatus === 'watchdog_timeout' ||
+      entry.commandStatus === 'force_timeout' ||
+      (typeof entry.status === 'string' && (
+        entry.status.toLowerCase().includes('timeout') ||
+        entry.status.toLowerCase().includes('error') ||
+        entry.status.toLowerCase().includes('gagal')
+      )) ||
+      entry.errorCode
+    );
+
+    const rawColor = entry.warna || entry.detectedColor || entry.color || '';
+    const rawMech = entry.mechanism || entry.mode || '';
+
+    // Normalisasi warna
+    let color = null;
+    const c = String(rawColor).toLowerCase().trim();
+    if (c.includes('kuning') || c.includes('yellow')) color = 'kuning';
+    else if (c.includes('biru') || c.includes('blue')) color = 'biru';
+    else if (c.includes('merah') || c.includes('red')) color = 'merah';
+
+    // Normalisasi mekanisme
+    let mechanism = 'servo';
+    const m = String(rawMech).toLowerCase().trim();
+    if (m.includes('arm')) mechanism = 'arm';
+    else if (m.includes('servo')) mechanism = 'servo';
+
+    const transactionId = entry.transactionId || entry.commandId || entry.runId || null;
+
+    if (isErr) {
+      return {
+        status: 'FAILED',
+        color,
+        mechanism,
+        transactionId,
+        raw: entry
+      };
+    }
+
+    // 2. Cek apakah ini transaksi VERIFIED (sensor fisik konfirmasi)
+    // Syarat VERIFIED:
+    // - verified === true, ATAU
+    // - sensorVerified === true, ATAU
+    // - verificationStatus === 'verified', ATAU
+    // - statusCategory === 'verified', ATAU
+    // - status memuat 'terverifikasi' DAN TIDAK memuat 'belum'
+    const isPhysicallyVerified = Boolean(
+      entry.verified === true ||
+      entry.sensorVerified === true ||
+      entry.verificationStatus === 'verified' ||
+      entry.statusCategory === 'verified' ||
+      (typeof entry.status === 'string' &&
+        entry.status.toLowerCase().includes('terverifikasi') &&
+        !entry.status.toLowerCase().includes('belum'))
+    );
+
+    if (isPhysicallyVerified) {
+      return {
+        status: 'VERIFIED',
+        color,
+        mechanism,
+        transactionId,
+        raw: entry
+      };
+    }
+
+    // 3. Gerakan selesai tetapi tanpa konfirmasi sensor fisik
+    return {
+      status: 'COMPLETED_UNVERIFIED',
+      color,
+      mechanism,
+      transactionId,
+      raw: entry
+    };
+  }
+
+  /**
+   * Agregasi Distribusi Penyortiran Khusus Transaksi VERIFIED:
+   * - Hanya transaksi berstatus 'VERIFIED' yang menambah distribusi 6-kategori (Warna - Mekanisme)
+   * - Transaksi 'COMPLETED_UNVERIFIED' tidak menambah distribusi atau keberhasilan
+   * - Transaksi 'FAILED' tidak menambah distribusi atau keberhasilan
+   * - Deduplikasi berdasarkan transaction ID unik untuk mencegah double counting
+   */
+  function aggregateSortingDistribution(entries = []) {
+    const seenTx = new Set();
+    const summary = {
+      // 6 Kategori Distribusi Fisik Terverifikasi (Warna — Mekanisme)
+      merah_arm: 0,
+      kuning_arm: 0,
+      biru_arm: 0,
+      merah_servo: 0,
+      kuning_servo: 0,
+      biru_servo: 0,
+
+      // Subtotal Warna Terverifikasi
+      merah: 0,
+      kuning: 0,
+      biru: 0,
+
+      // Subtotal Mekanisme Terverifikasi
+      armTotal: 0,
+      servoTotal: 0,
+
+      // Total Sukses Terverifikasi Fisik
+      totalVerified: 0,
+      total: 0, // Alias kompatibilitas dengan UI stat-total
+
+      // Pelacakan Transaksi Belum Terverifikasi (COMPLETED_UNVERIFIED)
+      unverifiedTotal: 0,
+      unverified: {
+        merah: 0,
+        kuning: 0,
+        biru: 0,
+        arm: 0,
+        servo: 0
+      },
+
+      // Total Error / Gagal
+      gagal: 0,
+
+      // Total Percobaan dengan Hasil Final Relevan: VERIFIED + COMPLETED_UNVERIFIED + FAILED
+      totalAttempts: 0,
+
+      // Persentase Keberhasilan Terverifikasi: (totalVerified / totalAttempts) * 100%
+      verifiedSuccessRate: 0.0,
+      successRateString: '0.0%'
+    };
+
+    const list = Array.isArray(entries) ? entries : Object.values(entries || {});
+
+    list.forEach((entry, idx) => {
+      if (!entry) return;
+      const classified = classifyTransaction(entry);
+      if (!classified) return;
+
+      // Deduplikasi transaksi unik menggunakan transaction ID atau key deterministik
+      const txId = classified.transactionId || `tx_${idx}_${entry.timestamp || Date.now()}`;
+      if (seenTx.has(txId)) return;
+      seenTx.add(txId);
+
+      if (classified.status === 'VERIFIED') {
+        const col = classified.color;
+        const mech = classified.mechanism;
+        if (col && (mech === 'arm' || mech === 'servo')) {
+          const key = `${col}_${mech}`;
+          if (typeof summary[key] === 'number') {
+            summary[key]++;
+          }
+          if (typeof summary[col] === 'number') {
+            summary[col]++;
+          }
+          if (mech === 'arm') summary.armTotal++;
+          else summary.servoTotal++;
+
+          summary.totalVerified++;
+          summary.total++;
+        }
+        summary.totalAttempts++;
+      } else if (classified.status === 'COMPLETED_UNVERIFIED') {
+        summary.unverifiedTotal++;
+        const col = classified.color;
+        const mech = classified.mechanism;
+        if (col && summary.unverified[col] !== undefined) {
+          summary.unverified[col]++;
+        }
+        if (mech && summary.unverified[mech] !== undefined) {
+          summary.unverified[mech]++;
+        }
+        summary.totalAttempts++;
+      } else if (classified.status === 'FAILED') {
+        summary.gagal++;
+        summary.totalAttempts++;
+      }
+    });
+
+    const relevantAttempts = summary.totalVerified + summary.unverifiedTotal + summary.gagal;
+    summary.totalAttempts = relevantAttempts;
+    summary.verifiedSuccessRate = relevantAttempts > 0
+      ? Number(((summary.totalVerified / relevantAttempts) * 100).toFixed(1))
+      : 0.0;
+    summary.successRateString = `${summary.verifiedSuccessRate.toFixed(1)}%`;
+
+    return summary;
   }
 
   // Nordic UART Service (Standar BLE untuk micro:bit MakeCode & ESP32 BLE UART)
@@ -1704,6 +1905,8 @@
     CANONICAL_CLASSES,
     CLASS_REGISTRY,
     resolveClassAndMechanism,
+    classifyTransaction,
+    aggregateSortingDistribution,
     NORDIC_UART_SERVICE_UUID,
     NORDIC_UART_RX_UUID,
     NORDIC_UART_TX_UUID,

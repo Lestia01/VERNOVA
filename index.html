@@ -898,28 +898,33 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
           <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 mb-5">
             <div class="card card-hover p-4 sm:p-5">
               <div class="metric-icon" style="background:var(--gold-soft);color:#8a6d1f"><i class="fas fa-boxes-stacked"></i></div>
-              <p class="metric-label" data-i18n="metric.total">Total Processed</p>
+              <p class="metric-label" data-i18n="metric.total">Total Terverifikasi</p>
               <p id="stat-total" class="metric-value mt-1" style="color:var(--brand)">0</p>
+              <span class="text-[10px] font-bold text-amber-600 dark:text-amber-400 block mt-0.5"><span id="stat-sub-unverified">0</span> Belum Verif</span>
             </div>
             <div class="card card-hover p-4 sm:p-5">
               <div class="metric-icon" style="background:#fef3c7;color:#b45309"><i class="fas fa-circle"></i></div>
               <p class="metric-label" data-i18n="metric.yellow">Kuning</p>
               <p id="stat-kuning" class="metric-value mt-1 t-main">0</p>
+              <span class="text-[10px] text-amber-600 dark:text-amber-400 block mt-0.5 font-bold">Arm: <span id="stat-kuning-arm">0</span> | Flap: <span id="stat-kuning-servo">0</span></span>
             </div>
             <div class="card card-hover p-4 sm:p-5">
               <div class="metric-icon" style="background:#dbe4f5;color:#1a2456"><i class="fas fa-circle"></i></div>
               <p class="metric-label" data-i18n="metric.blue">Biru</p>
               <p id="stat-biru" class="metric-value mt-1 t-main">0</p>
+              <span class="text-[10px] text-blue-600 dark:text-blue-400 block mt-0.5 font-bold">Arm: <span id="stat-biru-arm">0</span> | Flap: <span id="stat-biru-servo">0</span></span>
             </div>
             <div class="card card-hover p-4 sm:p-5">
               <div class="metric-icon" style="background:#fee2e2;color:#b91c1c"><i class="fas fa-circle"></i></div>
               <p class="metric-label" data-i18n="metric.red">Merah</p>
               <p id="stat-merah" class="metric-value mt-1 t-main">0</p>
+              <span class="text-[10px] text-red-600 dark:text-red-400 block mt-0.5 font-bold">Arm: <span id="stat-merah-arm">0</span> | Flap: <span id="stat-merah-servo">0</span></span>
             </div>
             <div class="card card-hover p-4 sm:p-5 col-span-2 md:col-span-1" style="border-color:#fecaca">
               <div class="metric-icon" style="background:#fef2f2;color:#dc2626"><i class="fas fa-triangle-exclamation"></i></div>
               <p class="metric-label" data-i18n="metric.error">Error</p>
               <p id="stat-error" class="metric-value mt-1" style="color:#dc2626">0</p>
+              <span class="text-[10px] text-rose-500 block mt-0.5 font-bold">Gagal / Timeout</span>
             </div>
           </div>
 
@@ -1004,7 +1009,14 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
             <div class="xl:col-span-2 flex flex-col gap-4 sm:gap-5">
               <div class="card p-4 sm:p-5">
-                <h3 class="card-title mb-4"><i class="fas fa-chart-column"></i><span data-i18n="chart.title">Sorting Distribution</span></h3>
+                <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                  <h3 class="card-title"><i class="fas fa-chart-column"></i><span data-i18n="chart.title">Distribusi Penyortiran</span></h3>
+                  <div class="flex items-center gap-2 flex-wrap text-[10px]">
+                    <span class="pill green font-bold" id="dist-verified-pill"><i class="fas fa-circle-check"></i> Terverifikasi Fisik: <span id="chart-verified-count">0</span></span>
+                    <span class="pill yellow font-bold" id="dist-unverified-pill"><i class="fas fa-clock"></i> Belum Terverifikasi: <span id="chart-unverified-count">0</span></span>
+                    <span class="pill gray font-bold" id="dist-rate-pill">Akurasi Fisik: <span id="chart-success-rate">0.0%</span></span>
+                  </div>
+                </div>
                 <div class="h-[210px] sm:h-[240px]"><canvas id="sortingChart"></canvas></div>
               </div>
 
@@ -2017,7 +2029,16 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   const state = {
     db: null, currentPath: "", unsubscribe: null, dbData: null,
     device: null, txChar: null, rxChar: null, bleConnected: false, bleBuffer: "",
-    sortingData: { kuning: 0, biru: 0, merah: 0, gagal: 0, total: 0 },
+    sortingData: {
+      merah_arm: 0, kuning_arm: 0, biru_arm: 0,
+      merah_servo: 0, kuning_servo: 0, biru_servo: 0,
+      kuning: 0, biru: 0, merah: 0,
+      armTotal: 0, servoTotal: 0,
+      total: 0, totalVerified: 0,
+      unverifiedTotal: 0,
+      unverified: { merah: 0, kuning: 0, biru: 0, arm: 0, servo: 0 },
+      gagal: 0, totalAttempts: 0, verifiedSuccessRate: 0.0, successRateString: '0.0%'
+    },
     excelLogs: [],
     feed: [],
     chart: null,
@@ -3293,10 +3314,36 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     state.pendingMode = null;
     setTimeout(() => { state.isCoolingDown = false; }, 1000);
 
-    state.sortingData[category]++;
-    state.sortingData.total++;
-
     const currentMode = startedMode || $('mode-selector').value;
+    const targetMech = (String(currentMode || '').toLowerCase().includes('arm')) ? 'arm' : 'servo';
+    const txObj = espRes.transaction || {};
+    const isVerified = Boolean(espRes.verified || txObj.verified || espRes.sensorVerified);
+    const statusCat = espRes.statusCategory || txObj.statusCategory || (isVerified ? 'verified' : 'completed_unverified');
+
+    // Revisi Distribusi: HANYA transaksi TERVERIFIKASI FISIK yang menambah nilai distribusi!
+    if (isVerified) {
+      const classKey = `${category}_${targetMech}`;
+      if (typeof state.sortingData[classKey] === 'number') state.sortingData[classKey]++;
+      if (typeof state.sortingData[category] === 'number') state.sortingData[category]++;
+      if (targetMech === 'arm') state.sortingData.armTotal++; else state.sortingData.servoTotal++;
+      state.sortingData.totalVerified++;
+      state.sortingData.total++;
+    } else {
+      // Transaksi COMPLETED_UNVERIFIED: tidak menambah distribusi keberhasilan warna / mekanisme
+      state.sortingData.unverifiedTotal++;
+      if (state.sortingData.unverified && typeof state.sortingData.unverified[category] === 'number') {
+        state.sortingData.unverified[category]++;
+      }
+      if (state.sortingData.unverified && typeof state.sortingData.unverified[targetMech] === 'number') {
+        state.sortingData.unverified[targetMech]++;
+      }
+    }
+
+    const attempts = (state.sortingData.totalVerified || state.sortingData.total) + (state.sortingData.unverifiedTotal || 0) + (state.sortingData.gagal || 0);
+    state.sortingData.totalAttempts = attempts;
+    state.sortingData.verifiedSuccessRate = attempts > 0 ? Number((((state.sortingData.totalVerified || state.sortingData.total) / attempts) * 100).toFixed(1)) : 0.0;
+    state.sortingData.successRateString = `${state.sortingData.verifiedSuccessRate.toFixed(1)}%`;
+
     const nowMs = Date.now();
     const now = new Date(nowMs);
     const timeStr = now.toLocaleTimeString('id-ID');
@@ -3305,9 +3352,6 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     const execStatus = espRes.executionStatus || (window.esp32Client.isSimulated() ? 'simulated_esp32' : 'confirmed_esp32_wifi');
     const espDeviceId = espRes.esp32DeviceId || (window.esp32Client.lastTelemetry && window.esp32Client.lastTelemetry.deviceId) || 'VERNOVA-ESP32';
     const cmdId = espRes.commandId || `CMD_${nowMs}`;
-    const txObj = espRes.transaction || {};
-    const isVerified = Boolean(espRes.verified || txObj.verified);
-    const statusCat = espRes.statusCategory || txObj.statusCategory || (isVerified ? 'verified' : 'completed_unverified');
     const opMode = (window.deviceManager && typeof window.deviceManager.getOperatingMode === 'function')
       ? window.deviceManager.getOperatingMode()
       : ((window.deviceManager && window.deviceManager.operatingMode) || 'AUTO');
@@ -3324,7 +3368,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       status: isVerified ? "Berhasil (Terverifikasi)" : "Berhasil (Belum Terverifikasi Fisik)",
       duration: formatDuration(durationMs),
       durationMs: durationMs || 0,
-      nilai: 1
+      nilai: isVerified ? 1 : 0
     });
 
     updateUIStats(); updateChart();
@@ -3368,15 +3412,28 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     }
   }
 
-  /* Deteksi AI mandiri (tanpa micro:bit / tanpa database): langsung catat */
+  /* Deteksi AI mandiri (tanpa verifikasi fisik sensor): catat sebagai belum terverifikasi */
   async function standaloneSortAction(category) {
     state.isCoolingDown = true;
     setTimeout(() => { state.isCoolingDown = false; }, 2500);
 
-    state.sortingData[category]++;
-    state.sortingData.total++;
-
     const currentMode = $('mode-selector').value;
+    const targetMech = (String(currentMode || '').toLowerCase().includes('arm')) ? 'arm' : 'servo';
+
+    // Tidak ada konfirmasi sensor fisik: jangan menambah distribusi keberhasilan
+    state.sortingData.unverifiedTotal++;
+    if (state.sortingData.unverified && typeof state.sortingData.unverified[category] === 'number') {
+      state.sortingData.unverified[category]++;
+    }
+    if (state.sortingData.unverified && typeof state.sortingData.unverified[targetMech] === 'number') {
+      state.sortingData.unverified[targetMech]++;
+    }
+
+    const attempts = (state.sortingData.totalVerified || state.sortingData.total) + (state.sortingData.unverifiedTotal || 0) + (state.sortingData.gagal || 0);
+    state.sortingData.totalAttempts = attempts;
+    state.sortingData.verifiedSuccessRate = attempts > 0 ? Number((((state.sortingData.totalVerified || state.sortingData.total) / attempts) * 100).toFixed(1)) : 0.0;
+    state.sortingData.successRateString = `${state.sortingData.verifiedSuccessRate.toFixed(1)}%`;
+
     const nowMs = Date.now();
     const now = new Date(nowMs);
     const timeStr = now.toLocaleTimeString('id-ID');
@@ -3388,17 +3445,19 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       timestamp: timeStr,
       warna: properColorName,
       mode: currentMode,
-      status: "Berhasil",
+      status: "Berhasil (Belum Terverifikasi Fisik)",
+      statusCategory: "completed_unverified",
+      verified: false,
       duration: '—',
       durationMs: 0,
-      nilai: 1
+      nilai: 0
     });
 
     updateUIStats(); updateChart();
 
     pushFeed({ icon: 'fas fa-check', style: feedStyleFor(category),
-      title: `${properColorName} Tersortir`,
-      desc: `${dateTimeStr} · ${currentMode} · Langsung (tanpa BT)`,
+      title: `${properColorName} Tersortir (BELUM TERVERIFIKASI FISIK)`,
+      desc: `${dateTimeStr} · ${currentMode} · Standalone`,
       ts: nowMs, kind: 'data', key: `ok|${category}|${nowMs}|${currentMode}` });
 
     if (state.db) {
@@ -3480,7 +3539,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     }
   };
 
-  /* Input manual K / B / M — kalau sensor belum detect, langsung nambah */
+  /* Input manual K / B / M — pengiriman perintah manual oleh operator */
   window.manualAdd = async (color) => {
     const c = String(color || '').toLowerCase();
     if (!['kuning', 'biru', 'merah'].includes(c)) return;
@@ -3491,10 +3550,22 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     state.isCoolingDown = false;
 
     const currentMode = $('mode-selector').value;
+    const targetMech = (String(currentMode || '').toLowerCase().includes('arm')) ? 'arm' : 'servo';
     window.deviceManager.dispatchSortingCommand({ color: c, mode: currentMode, force: true }).catch(e => console.warn(e));
 
-    state.sortingData[c]++;
-    state.sortingData.total++;
+    // Belum terverifikasi sensor fisik: jangan menambah distribusi keberhasilan
+    state.sortingData.unverifiedTotal++;
+    if (state.sortingData.unverified && typeof state.sortingData.unverified[c] === 'number') {
+      state.sortingData.unverified[c]++;
+    }
+    if (state.sortingData.unverified && typeof state.sortingData.unverified[targetMech] === 'number') {
+      state.sortingData.unverified[targetMech]++;
+    }
+    const attempts = (state.sortingData.totalVerified || state.sortingData.total) + (state.sortingData.unverifiedTotal || 0) + (state.sortingData.gagal || 0);
+    state.sortingData.totalAttempts = attempts;
+    state.sortingData.verifiedSuccessRate = attempts > 0 ? Number((((state.sortingData.totalVerified || state.sortingData.total) / attempts) * 100).toFixed(1)) : 0.0;
+    state.sortingData.successRateString = `${state.sortingData.verifiedSuccessRate.toFixed(1)}%`;
+
     const nowMs = Date.now();
     const now = new Date(nowMs);
     const timeStr = now.toLocaleTimeString('id-ID');
@@ -3506,17 +3577,19 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       timestamp: timeStr,
       warna: properColorName,
       mode: currentMode,
-      status: 'Manual',
+      status: 'Manual (Belum Terverifikasi Fisik)',
+      statusCategory: 'completed_unverified',
+      verified: false,
       duration: '—',
       durationMs: 0,
-      nilai: 1
+      nilai: 0
     });
 
     updateUIStats(); updateChart();
 
     pushFeed({ icon: 'fas fa-hand-pointer', style: feedStyleFor(c),
-      title: `${properColorName} Manual`,
-      desc: `${dateTimeStr} · ${currentMode}`,
+      title: `${properColorName} Sortir Manual (BELUM TERVERIFIKASI FISIK)`,
+      desc: `${dateTimeStr} · ${currentMode} · Input Keyboard`,
       ts: nowMs, kind: 'data', key: `ok|${c}|${nowMs}|${currentMode}` });
 
     if (state.db) {
@@ -3529,11 +3602,14 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
           mode: currentMode,
           commandStatus: 'manual_override',
           executionStatus: 'operator_entry',
+          statusCategory: 'completed_unverified',
+          verificationStatus: 'completed_unverified',
+          verified: false,
           sortResult: 'success',
-          status: 'Manual',
+          status: 'Manual (Belum Terverifikasi Fisik)',
           duration: 0,
           durationMs: 0,
-          value: 1
+          value: 0
         });
       } catch (e) {}
     }
@@ -3553,7 +3629,16 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
   window.resetData = async () => {
     if (confirm("Reset seluruh data visual, memori history, dan cloud?")) {
-      state.sortingData = { kuning: 0, biru: 0, merah: 0, gagal: 0, total: 0 };
+      state.sortingData = {
+        merah_arm: 0, kuning_arm: 0, biru_arm: 0,
+        merah_servo: 0, kuning_servo: 0, biru_servo: 0,
+        kuning: 0, biru: 0, merah: 0,
+        armTotal: 0, servoTotal: 0,
+        total: 0, totalVerified: 0,
+        unverifiedTotal: 0,
+        unverified: { merah: 0, kuning: 0, biru: 0, arm: 0, servo: 0 },
+        gagal: 0, totalAttempts: 0, verifiedSuccessRate: 0.0, successRateString: '0.0%'
+      };
       state.excelLogs = [];
       state.feed = [];
       state.pendingDetection = null;
@@ -3568,7 +3653,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   };
 
   /* ================================================================== */
-  /*  UI STATS + CHART                                                   */
+  /*  UI STATS + CHART (HANYA MEMUAT DATA TERVERIFIKASI FISIK)          */
   /* ================================================================== */
   function popMetric(id) {
     const el = $(id);
@@ -3578,18 +3663,36 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     el.classList.add('pop');
   }
   function updateUIStats() {
-    $('stat-total').innerText = state.sortingData.total;
-    $('stat-kuning').innerText = state.sortingData.kuning;
-    $('stat-biru').innerText = state.sortingData.biru;
-    $('stat-merah').innerText = state.sortingData.merah;
-    $('stat-gagal').innerText = state.sortingData.gagal;
-    const se = $('stat-error'); if (se) se.innerText = state.sortingData.gagal;
+    const set = (id, val) => { const el = $(id); if (el) el.innerText = val; };
+    set('stat-total', state.sortingData.total || 0);
+    set('stat-kuning', state.sortingData.kuning || 0);
+    set('stat-biru', state.sortingData.biru || 0);
+    set('stat-merah', state.sortingData.merah || 0);
+    set('stat-error', state.sortingData.gagal || 0);
+    set('stat-gagal', state.sortingData.gagal || 0);
+
+    // Sub-metrik per mekanisme (Hanya terverifikasi)
+    set('stat-sub-unverified', state.sortingData.unverifiedTotal || 0);
+    set('stat-kuning-arm', state.sortingData.kuning_arm || 0);
+    set('stat-kuning-servo', state.sortingData.kuning_servo || 0);
+    set('stat-biru-arm', state.sortingData.biru_arm || 0);
+    set('stat-biru-servo', state.sortingData.biru_servo || 0);
+    set('stat-merah-arm', state.sortingData.merah_arm || 0);
+    set('stat-merah-servo', state.sortingData.merah_servo || 0);
+
+    // Pills pada Header Diagram Distribusi
+    set('chart-verified-count', state.sortingData.total || 0);
+    set('chart-unverified-count', state.sortingData.unverifiedTotal || 0);
+    set('chart-success-rate', state.sortingData.successRateString || (state.sortingData.verifiedSuccessRate ? `${state.sortingData.verifiedSuccessRate.toFixed(1)}%` : '0.0%'));
+
     ['stat-total', 'stat-kuning', 'stat-biru', 'stat-merah', 'stat-error'].forEach(popMetric);
     try { checkRules(); } catch (e) {}
   }
 
   function chartLabels() {
-    return state.lang === 'id' ? ['Kuning', 'Biru', 'Merah', 'Error'] : ['Yellow', 'Blue', 'Red', 'Error'];
+    return state.lang === 'id'
+      ? ['Merah — Arm', 'Kuning — Arm', 'Biru — Arm', 'Merah — Servo', 'Kuning — Servo', 'Biru — Servo']
+      : ['Red — Arm', 'Yellow — Arm', 'Blue — Arm', 'Red — Servo', 'Yellow — Servo', 'Blue — Servo'];
   }
 
   function computeYMax(values) {
@@ -3618,19 +3721,40 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         data: {
           labels: chartLabels(),
           datasets: [{
-            data: [0, 0, 0, 0],
-            backgroundColor: ['#c69a45', '#2b4b9b', '#b91c1c', '#94a3b8'],
-            hoverBackgroundColor: ['#97742a', '#1a2456', '#991b1b', '#64748b'],
+            data: [0, 0, 0, 0, 0, 0],
+            backgroundColor: [
+              '#991b1b', // Merah - Arm (Dark crimson)
+              '#b45309', // Kuning - Arm (Amber gold)
+              '#1e3a8a', // Biru - Arm (Navy dark blue)
+              '#ef4444', // Merah - Servo (Vibrant red)
+              '#eab308', // Kuning - Servo (Vibrant yellow)
+              '#3b82f6'  // Biru - Servo (Vibrant blue)
+            ],
+            hoverBackgroundColor: [
+              '#7f1d1d',
+              '#92400e',
+              '#172554',
+              '#dc2626',
+              '#ca8a04',
+              '#2563eb'
+            ],
             borderRadius: 10, borderSkipped: false,
-            maxBarThickness: 64, minBarLength: 2
+            maxBarThickness: 54, minBarLength: 2
           }]
         },
         options: {
           responsive: true, maintainAspectRatio: false,
           animation: { duration: 600, easing: 'easeOutQuart' },
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` Terverifikasi Fisik: ${ctx.parsed.y} unit`
+              }
+            }
+          },
           scales: {
-            x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { weight: '700', size: 11 } } },
+            x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { weight: '700', size: 10 } } },
             y: { beginAtZero: true, max: state.chartYMax,
               grid: { color: 'rgba(148,163,184,.16)' },
               ticks: { color: '#94a3b8', precision: 0, font: { size: 11 },
@@ -3656,10 +3780,12 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   function updateChart() {
     if (!state.chart) { try { initChart(); } catch (e) {} return; }
     const newData = [
-      state.sortingData.kuning,
-      state.sortingData.biru,
-      state.sortingData.merah,
-      state.sortingData.gagal
+      state.sortingData.merah_arm || 0,
+      state.sortingData.kuning_arm || 0,
+      state.sortingData.biru_arm || 0,
+      state.sortingData.merah_servo || 0,
+      state.sortingData.kuning_servo || 0,
+      state.sortingData.biru_servo || 0
     ];
     try {
       const needed = computeYMax(newData);
@@ -3668,7 +3794,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         state.chart.options.scales.y.max = needed;
       }
       const ds = state.chart.data.datasets[0].data;
-      ds[0] = newData[0]; ds[1] = newData[1]; ds[2] = newData[2]; ds[3] = newData[3];
+      for (let i = 0; i < 6; i++) {
+        ds[i] = newData[i];
+      }
       state.chart.data.labels = chartLabels();
       state.chart.update();
     } catch (err) { console.warn('updateChart gagal:', err); }
@@ -3715,13 +3843,21 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
           const arr = Array.isArray(obj) ? obj : Object.values(obj);
           return arr.filter(x => x !== null && typeof x === 'object');
         };
-        const count = (obj) => collectCloud(obj).length;
-        state.sortingData = {
-          kuning: count(data.kuning), biru: count(data.biru), merah: count(data.merah),
-          gagal: count(data.gagal),
-          total: count(data.kuning) + count(data.biru) + count(data.merah)
-        };
+        const allEntries = [
+          ...collectCloud(data.kuning),
+          ...collectCloud(data.biru),
+          ...collectCloud(data.merah),
+          ...collectCloud(data.gagal)
+        ];
+
+        // Agregasi terpadu hanya menghitung transaksi TERVERIFIKASI FISIK
+        if (typeof aggregateSortingDistribution === 'function') {
+          state.sortingData = aggregateSortingDistribution(allEntries);
+        } else if (typeof window.aggregateSortingDistribution === 'function') {
+          state.sortingData = window.aggregateSortingDistribution(allEntries);
+        }
         updateUIStats(); updateChart();
+
         /* Gabung riwayat cloud yg belum ada di feed (samakan guest) */
         try {
           const seen = new Set(state.feed.map(x => x.key));
@@ -3734,8 +3870,16 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
               const key = `ok|${k}|${ts}|${mode}`;
               if (!seen.has(key)) {
                 seen.add(key);
-                add.push({ key, icon: 'fas fa-check', style: feedStyleFor(k),
-                  title: `${proper[k]} Tersortir`,
+                const isVer = Boolean(
+                  e.verified === true ||
+                  e.sensorVerified === true ||
+                  e.verificationStatus === 'verified' ||
+                  e.statusCategory === 'verified' ||
+                  (typeof e.status === 'string' && e.status.toLowerCase().includes('terverifikasi') && !e.status.toLowerCase().includes('belum'))
+                );
+                const verLabel = isVer ? 'TERVERIFIKASI' : 'BELUM TERVERIFIKASI FISIK';
+                add.push({ key, icon: isVer ? 'fas fa-circle-check' : 'fas fa-check', style: feedStyleFor(k),
+                  title: `${proper[k]} Tersortir (${verLabel})`,
                   desc: `${ts ? formatDateTime(new Date(ts)) : '-'} · ${mode}`,
                   ts, kind: 'data' });
               }
@@ -3964,9 +4108,27 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
   function getSummary() {
     const d = state.sortingData;
-    const attempts = d.total + d.gagal;
-    const rate = attempts > 0 ? ((d.total / attempts) * 100).toFixed(1) : '0.0';
-    return { total: d.total, kuning: d.kuning, biru: d.biru, merah: d.merah, gagal: d.gagal, rate, attempts };
+    const attempts = d.totalAttempts || (d.total + (d.unverifiedTotal || 0) + d.gagal);
+    const rate = d.successRateString || (attempts > 0 ? ((d.total / attempts) * 100).toFixed(1) + '%' : '0.0%');
+    return {
+      total: d.total || 0,
+      totalVerified: d.total || 0,
+      kuning: d.kuning || 0,
+      biru: d.biru || 0,
+      merah: d.merah || 0,
+      merah_arm: d.merah_arm || 0,
+      kuning_arm: d.kuning_arm || 0,
+      biru_arm: d.biru_arm || 0,
+      merah_servo: d.merah_servo || 0,
+      kuning_servo: d.kuning_servo || 0,
+      biru_servo: d.biru_servo || 0,
+      armTotal: d.armTotal || 0,
+      servoTotal: d.servoTotal || 0,
+      unverifiedTotal: d.unverifiedTotal || 0,
+      gagal: d.gagal || 0,
+      rate,
+      attempts
+    };
   }
 
   /* Render ringkasan di modal export — selalu full (samakan guest) */
@@ -3997,7 +4159,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   }
 
   function hasAnyData() {
-    return (state.sortingData.total + state.sortingData.gagal) > 0
+    return (state.sortingData.total + (state.sortingData.unverifiedTotal || 0) + state.sortingData.gagal) > 0
       || buildCloudLogs().length > 0 || state.excelLogs.length > 0;
   }
 
@@ -4015,23 +4177,30 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       collectEntries(data[k]).forEach(e => {
         const ts = Number(e.timestamp) || 0;
         const dur = Number(e.duration) || 0;
+        const isVer = Boolean(
+          e.verified === true ||
+          e.sensorVerified === true ||
+          e.verificationStatus === 'verified' ||
+          e.statusCategory === 'verified' ||
+          (typeof e.status === 'string' && e.status.toLowerCase().includes('terverifikasi') && !e.status.toLowerCase().includes('belum'))
+        );
         out.push({
           datetime: ts ? formatDateTime(new Date(ts)) : '-',
           timestamp: ts ? new Date(ts).toLocaleTimeString('id-ID') : '-',
           warna: proper[k],
           mode: e.mode || '-',
-          status: 'Berhasil',
+          status: isVer ? 'Berhasil (Terverifikasi)' : 'Berhasil (Belum Terverifikasi Fisik)',
+          statusCategory: isVer ? 'verified' : 'completed_unverified',
+          verified: isVer,
           duration: dur ? formatDuration(dur) : '—',
           durationMs: dur,
-          nilai: 1,
+          nilai: isVer ? 1 : 0,
           _ts: ts
         });
       });
     });
     collectEntries(data.gagal).forEach(e => {
       const ts = Number(e.timestamp) || 0;
-      // Samakan database: warna dinormalisasi, status & mode dibaca dari DB.
-      // Baris tanpa warna valid diisi dari baris tetangga terdekat (tanpa Unknown).
       const kw = (window.raiKnownWarna && window.raiKnownWarna(e.warna)) || null;
       out.push({
         datetime: ts ? formatDateTime(new Date(ts)) : '-',
@@ -4039,6 +4208,8 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         warna: kw || e.warna || null,
         mode: e.mode || '-',
         status: e.status || 'Timeout/Error',
+        statusCategory: 'failed',
+        verified: false,
         duration: '—',
         durationMs: 0,
         nilai: 0,
@@ -4128,22 +4299,34 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     aoa.push(['R-LAB — SMART SORTING FACTORY REPORT']);
     aoa.push(['Generated', formatDateTime(new Date()), '', exportSourceTag()]);
     aoa.push([]);
-    aoa.push(['SORTING SUMMARY']);
+    aoa.push(['RINGKASAN DISTRIBUSI TERVERIFIKASI FISIK']);
 
-    // Ringkasan full + error selalu (samakan guest)
+    // Ringkasan 6 kategori terverifikasi fisik + status audit
     const L = (id, en) => state.lang === 'en' ? en : id;
-    const errRate = s.attempts > 0 ? ((s.gagal / s.attempts) * 100).toFixed(1) + '%' : '0.0%';
-    const summaryHeader = [L('Total Diproses','Total Processed'), L('Kuning','Yellow'), L('Biru','Blue'), L('Merah','Red')];
-    const summaryValues = [s.total, s.kuning, s.biru, s.merah];
+    const summaryHeader = [
+      L('Total Terverifikasi','Total Verified'),
+      'Merah (Arm)', 'Kuning (Arm)', 'Biru (Arm)',
+      'Merah (Servo)', 'Kuning (Servo)', 'Biru (Servo)'
+    ];
+    const summaryValues = [
+      s.total,
+      s.merah_arm, s.kuning_arm, s.biru_arm,
+      s.merah_servo, s.kuning_servo, s.biru_servo
+    ];
 
     const SUMMARY_HEADER_ROW = aoa.length;
     aoa.push(summaryHeader);
     const SUMMARY_VALUE_ROW = aoa.length;
     aoa.push(summaryValues);
     aoa.push([]);
-    aoa.push(['Error Count', 'Error Rate', 'Total Attempts']);
+    aoa.push([
+      L('Belum Terverifikasi Fisik','Unverified (No Sensor)'),
+      L('Error / Gagal','Error Count'),
+      L('Akurasi Terverifikasi Fisik','Verified Success Rate'),
+      L('Total Percobaan Final','Total Final Attempts')
+    ]);
     const ERROR_HEADER_ROW = aoa.length - 1;
-    aoa.push([s.gagal, errRate, s.attempts]);
+    aoa.push([s.unverifiedTotal, s.gagal, s.rate, s.attempts]);
     const ERROR_VALUE_ROW = aoa.length - 1;
 
     aoa.push([]);
@@ -4269,25 +4452,25 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(26, 36, 86);
       doc.text(txt, 40, y);
     };
-    sectionTitle('1. SORTING SUMMARY', 110);
+    sectionTitle('1. PHYSICAL VERIFICATION SUMMARY', 110);
     doc.autoTable({
       startY: 116,
-      head: [[L('Total Diproses','Total Processed'), L('Kuning','Yellow'), L('Biru','Blue'), L('Merah','Red')]],
-      body: [[s.total, s.kuning, s.biru, s.merah]],
+      head: [[L('Total Terverifikasi','Total Verified'), 'Merah (Arm)', 'Kuning (Arm)', 'Biru (Arm)', 'Merah (Flap)', 'Kuning (Flap)', 'Biru (Flap)']],
+      body: [[s.total, s.merah_arm, s.kuning_arm, s.biru_arm, s.merah_servo, s.kuning_servo, s.biru_servo]],
       theme: 'grid',
-      headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 9, halign: 'center', fontStyle: 'bold' },
-      bodyStyles: { fontSize: 12, halign: 'center', fontStyle: 'bold', textColor: [30, 41, 59] },
+      headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8, halign: 'center', fontStyle: 'bold' },
+      bodyStyles: { fontSize: 10, halign: 'center', fontStyle: 'bold', textColor: [30, 41, 59] },
       margin: { left: 40, right: 40 }
     });
 
-    sectionTitle('2. ERROR SUMMARY', (doc.lastAutoTable ? doc.lastAutoTable.finalY : 160) + 24);
+    sectionTitle('2. VERIFICATION ACCURACY & AUDIT', (doc.lastAutoTable ? doc.lastAutoTable.finalY : 160) + 20);
     doc.autoTable({
-      startY: (doc.lastAutoTable ? doc.lastAutoTable.finalY : 160) + 30,
-      head: [['Error', 'Error Rate', 'Total Attempts']],
-      body: [[s.gagal + 'x error', errRateAll, s.attempts]],
+      startY: (doc.lastAutoTable ? doc.lastAutoTable.finalY : 160) + 26,
+      head: [[L('Belum Terverifikasi Fisik','Unverified (No Sensor)'), L('Error / Gagal','Error Count'), L('Akurasi Terverifikasi Fisik','Verified Success Rate'), L('Total Percobaan','Total Attempts')]],
+      body: [[s.unverifiedTotal + 'x unverified', s.gagal + 'x error', s.rate, s.attempts]],
       theme: 'grid',
-      headStyles: { fillColor: [153, 27, 27], textColor: 255, fontSize: 9, halign: 'center', fontStyle: 'bold' },
-      bodyStyles: { fontSize: 11, halign: 'center', fontStyle: 'bold', textColor: [153, 27, 27], fillColor: [254, 226, 226] },
+      headStyles: { fillColor: [180, 83, 9], textColor: 255, fontSize: 8, halign: 'center', fontStyle: 'bold' },
+      bodyStyles: { fontSize: 10, halign: 'center', fontStyle: 'bold', textColor: [180, 83, 9] },
       margin: { left: 40, right: 40 }
     });
 

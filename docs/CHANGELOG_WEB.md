@@ -3,6 +3,24 @@ Semua perubahan penting pada kode program website dan perangkat lunak proyek **V
 
 Format mengikuti prinsip [Keep a Changelog](https://keepachangelog.com/id/1.0.0/) dan menganut [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-11-25
+
+### Diubah (Changed) & Diperbaiki (Fixed)
+- **Revisi Distribusi Penyortiran Berdasarkan Verifikasi Fisik Sensor:**
+  - Grafik dan statistik **Distribusi Penyortiran** kini HANYA menampilkan dan menghitung transaksi yang telah terverifikasi secara fisik oleh sensor (`VERIFIED`).
+  - Transaksi dengan status `COMPLETED_UNVERIFIED` (label `BELUM TERVERIFIKASI FISIK`) dan transaksi `FAILED` / `TIMEOUT` TIDAK menambah nilai distribusi keberhasilan pada warna maupun mekanisme manapun.
+  - Diagram Distribusi Penyortiran memisahkan 6 kategori kanonik (Warna — Mekanisme): `Merah — Arm`, `Kuning — Arm`, `Biru — Arm`, `Merah — Servo`, `Kuning — Servo`, `Biru — Servo`.
+  - Penghitungan akurasi keberhasilan fisik menggunakan rumus ketat: `Persentase Keberhasilan Terverifikasi = (Jumlah Transaksi VERIFIED / Total Percobaan Final [VERIFIED + COMPLETED_UNVERIFIED + FAILED]) × 100%`.
+  - Penyematan indikator telemetri pada header diagram: *Pill Terverifikasi Fisik*, *Pill Belum Terverifikasi*, dan *Akurasi Fisik*.
+  - Deduplikasi transaksi menggunakan `transactionId` unik untuk mencegah *double-counting* dari multiple snapshot Firebase atau event listener berulang.
+  - Konsistensi ekspor laporan Excel (.xlsx), PDF, dan CSV yang memisahkan ringkasan verifikasi sensor fisik dari riwayat audit lengkap.
+  - Kompatibilitas mundur penuh untuk data lawas Firebase tanpa mengubah atau menghapus data riwayat yang ada.
+- **Suite Pengujian Otomatis:**
+  - Penambahan `tests/physical_verification_distribution.test.js` mencakup 8 Skenario Wajib (A s.d. H).
+  - Total pengujian: **83 pengujian Node.js + 5 pengujian Python = 88 pengujian 100% Lulus**.
+
+---
+
 ## [2.6.0] - 2026-11-25
 
 ### Ditambahkan (Added)
