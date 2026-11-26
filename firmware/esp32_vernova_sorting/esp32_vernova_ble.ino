@@ -32,11 +32,14 @@
 
 #define PIN_CONVEYOR_BELT 23 // Pin kontrol Motor DC Conveyor Belt (Relay / Driver MOSFET)
 
-// Logika sensor: Active LOW (standar sensor IR proximity pada ESP32)
+// Logika sensor: Active LOW (standar sensor optik / proximity IR pada ESP32)
 #define SENSOR_ACTIVE_ARM     LOW
 #define SENSOR_ACTIVE_MERAH   LOW
 #define SENSOR_ACTIVE_BIRU    LOW
 #define SENSOR_ACTIVE_KUNING  LOW
+
+// Waktu debounce sensor (ms) untuk stabilitas sinyal optik
+#define SENSOR_DEBOUNCE_MS    30
 
 Servo servoFlap;
 Servo servoArm;
@@ -46,6 +49,32 @@ BLECharacteristic *pTxCharacteristic = NULL;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 String currentMode = "Servo";
+
+// Struktur data 4 sensor fisik
+enum SensorIndex {
+  IDX_MERAH = 0,
+  IDX_BIRU,
+  IDX_KUNING,
+  IDX_ARM,
+  TOTAL_SENSORS
+};
+
+struct SensorChannel {
+  const char* name;
+  uint8_t pin;
+  uint8_t activeLevel;
+  bool isInputPullup;
+  bool lastRaw;
+  bool debouncedPresent;
+  unsigned long lastDebounceTime;
+};
+
+SensorChannel sensorChannels[TOTAL_SENSORS] = {
+  { "MERAH",  PIN_SENSOR_MERAH,  SENSOR_ACTIVE_MERAH,  true,  false, false, 0 },
+  { "BIRU",   PIN_SENSOR_BIRU,   SENSOR_ACTIVE_BIRU,   true,  false, false, 0 },
+  { "KUNING", PIN_SENSOR_KUNING, SENSOR_ACTIVE_KUNING, false, false, false, 0 }, // GPIO 35 Input-only
+  { "ARM",    PIN_SENSOR_ARM,    SENSOR_ACTIVE_ARM,    false, false, false, 0 }  // GPIO 34 Input-only
+};
 
 // Status State Machine Kontrol Conveyor & ARM
 enum SortState {
@@ -63,27 +92,75 @@ String activeTxId = "";
 unsigned long stateTimer = 0;
 bool targetConfirmed = false;
 bool beltRunning = false;
-int lastArmSensorVal = -1;
 
 void notifyBLE(String message) {
   if (deviceConnected && pTxCharacteristic) {
     pTxCharacteristic->setValue(message.c_str());
     pTxCharacteristic->notify();
-    delay(20);
+    delay(15);
     Serial.print("[BLE TX] ");
+    Serial.print(message);
+    if (!message.endsWith("\n")) Serial.println();
+  } else {
+    // BLE belum terhubung, catat telemetri ke Serial Monitor
+    Serial.print("[LOCAL TX] ");
     Serial.print(message);
     if (!message.endsWith("\n")) Serial.println();
   }
 }
 
+// Mengirim status seluruh sensor (misal saat Web Client baru terhubung)
+void sendAllSensorStates() {
+  for (int i = 0; i < TOTAL_SENSORS; i++) {
+    String msg = "SENSOR:" + String(sensorChannels[i].name) + ":" + (sensorChannels[i].debouncedPresent ? "OBJECT_PRESENT\n" : "OBJECT_ABSENT\n");
+    notifyBLE(msg);
+  }
+}
+
+// Membaca dan memfilter pembacaan seluruh sensor dengan debounce
+void updateSensors() {
+  unsigned long now = millis();
+  for (int i = 0; i < TOTAL_SENSORS; i++) {
+    int rawRead = digitalRead(sensorChannels[i].pin);
+    bool isPresent = (rawRead == sensorChannels[i].activeLevel);
+
+    if (isPresent != sensorChannels[i].lastRaw) {
+      sensorChannels[i].lastRaw = isPresent;
+      sensorChannels[i].lastDebounceTime = now;
+    }
+
+    if ((now - sensorChannels[i].lastDebounceTime) >= SENSOR_DEBOUNCE_MS) {
+      if (sensorChannels[i].debouncedPresent != isPresent) {
+        sensorChannels[i].debouncedPresent = isPresent;
+        
+        // Kirim notifikasi identitas sensor spesifik ke website
+        String msg = "SENSOR:" + String(sensorChannels[i].name) + ":" + (isPresent ? "OBJECT_PRESENT\n" : "OBJECT_ABSENT\n");
+        notifyBLE(msg);
+
+        // Kirim notifikasi umum untuk kompatibilitas
+        if (isPresent) {
+          notifyBLE("SENSOR:OBJECT_PRESENT\n");
+        } else {
+          // Hanya kirim absent jika semua sensor tujuan absent
+          bool anyPresent = false;
+          for (int j = 0; j < TOTAL_SENSORS; j++) {
+            if (sensorChannels[j].debouncedPresent) anyPresent = true;
+          }
+          if (!anyPresent) notifyBLE("SENSOR:OBJECT_ABSENT\n");
+        }
+      }
+    }
+  }
+}
+
 bool isSensorArmTriggered() {
-  return digitalRead(PIN_SENSOR_ARM) == SENSOR_ACTIVE_ARM;
+  return sensorChannels[IDX_ARM].debouncedPresent;
 }
 
 bool isTargetSensorTriggered(String color) {
-  if (color == "merah") return digitalRead(PIN_SENSOR_MERAH) == SENSOR_ACTIVE_MERAH;
-  if (color == "kuning") return digitalRead(PIN_SENSOR_KUNING) == SENSOR_ACTIVE_KUNING;
-  if (color == "biru") return digitalRead(PIN_SENSOR_BIRU) == SENSOR_ACTIVE_BIRU;
+  if (color == "merah") return sensorChannels[IDX_MERAH].debouncedPresent;
+  if (color == "kuning") return sensorChannels[IDX_KUNING].debouncedPresent;
+  if (color == "biru") return sensorChannels[IDX_BIRU].debouncedPresent;
   return false;
 }
 
@@ -103,6 +180,8 @@ class MyServerCallbacks: public BLEServerCallbacks {
       digitalWrite(PIN_LED_STATUS, HIGH);
       Serial.println("[BLE] Web Client Connected!");
       notifyBLE("STATUS:READY\n");
+      // Kirim status awal seluruh sensor saat baru terhubung
+      sendAllSensorStates();
     };
 
     void onDisconnect(BLEServer* pServer) {
@@ -166,13 +245,13 @@ class MyCallbacks: public BLECharacteristicCallbacks {
           if (startQ != -1 && endQ != -1) txId = rxValue.substring(startQ + 1, endQ);
         }
 
-        // Deteksi 6 kelas orientasi mekanisme
+        // Deteksi 6 kelas kanonik: merah_arm, merah_servo, biru_arm, biru_servo, kuning_arm, kuning_servo
         if (rxValue.indexOf("merah_arm") != -1) { color = "merah"; mode = "Arm"; }
-        else if (rxValue.indexOf("kuning_arm") != -1) { color = "kuning"; mode = "Arm"; }
-        else if (rxValue.indexOf("biru_arm") != -1) { color = "biru"; mode = "Arm"; }
         else if (rxValue.indexOf("merah_servo") != -1) { color = "merah"; mode = "Servo"; }
-        else if (rxValue.indexOf("kuning_servo") != -1) { color = "kuning"; mode = "Servo"; }
+        else if (rxValue.indexOf("biru_arm") != -1) { color = "biru"; mode = "Arm"; }
         else if (rxValue.indexOf("biru_servo") != -1) { color = "biru"; mode = "Servo"; }
+        else if (rxValue.indexOf("kuning_arm") != -1) { color = "kuning"; mode = "Arm"; }
+        else if (rxValue.indexOf("kuning_servo") != -1) { color = "kuning"; mode = "Servo"; }
         else {
           if (rxValue.indexOf("kuning") != -1) color = "kuning";
           else if (rxValue.indexOf("biru") != -1) color = "biru";
@@ -271,15 +350,38 @@ void runStateMachine() {
       if (isTargetSensorTriggered(activeColor)) {
         targetConfirmed = true;
         notifyBLE("STATUS:TARGET_DETECTED\n");
+        String colorUpper = activeColor;
+        colorUpper.toUpperCase();
+        notifyBLE("SENSOR:" + colorUpper + ":OBJECT_PRESENT\n");
         notifyBLE("SENSOR:OBJECT_PRESENT\n");
-        currentState = STATE_WAIT_ARM_CLEAR;
-        stateTimer = millis();
-      } else if (millis() - stateTimer > 4000) {
+
+        if (activeMode == "Servo") {
+          // Pada mode Servo, konfirmasi target langsung menyelesaikan siklus sortir
+          int targetPin = (activeColor == "kuning") ? 35 : ((activeColor == "biru") ? 13 : 14);
+          String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + activeColor + "\",\"mode\":\"" + activeMode + "\",\"status\":\"VERIFIED\",\"sensorVerified\":true,\"sensor\":\"" + colorUpper + "\",\"targetPin\":" + String(targetPin) + ",\"id\":\"" + activeTxId + "\"}\n";
+          notifyBLE(ack);
+          currentState = STATE_IDLE;
+        } else {
+          // Pada mode ARM, wajib menunggu sampai GPIO 34 clear sebelum belt berjalan kembali
+          currentState = STATE_WAIT_ARM_CLEAR;
+          stateTimer = millis();
+        }
+      } else if (millis() - stateTimer > 5000) {
         targetConfirmed = false;
-        notifyBLE("SENSOR:OBJECT_ABSENT\n");
+        String colorUpper = activeColor;
+        colorUpper.toUpperCase();
+        notifyBLE("SENSOR:" + colorUpper + ":OBJECT_ABSENT\n");
         notifyBLE("STATUS:COMPLETED_UNVERIFIED\n");
-        currentState = STATE_WAIT_ARM_CLEAR;
-        stateTimer = millis();
+
+        if (activeMode == "Servo") {
+          int targetPin = (activeColor == "kuning") ? 35 : ((activeColor == "biru") ? 13 : 14);
+          String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + activeColor + "\",\"mode\":\"" + activeMode + "\",\"status\":\"COMPLETED_UNVERIFIED\",\"sensorVerified\":false,\"sensor\":\"" + colorUpper + "\",\"targetPin\":" + String(targetPin) + ",\"id\":\"" + activeTxId + "\"}\n";
+          notifyBLE(ack);
+          currentState = STATE_IDLE;
+        } else {
+          currentState = STATE_WAIT_ARM_CLEAR;
+          stateTimer = millis();
+        }
       }
       break;
 
@@ -291,11 +393,15 @@ void runStateMachine() {
       // - Jangan menjalankan belt hanya berdasarkan timer atau karena gerakan ARM selesai.
       if (!isSensorArmTriggered()) {
         // Objek sudah benar-benar meninggalkan sensor ARM GPIO 34
+        String colorUpper = activeColor;
+        colorUpper.toUpperCase();
+        int targetPin = (activeColor == "kuning") ? 35 : ((activeColor == "biru") ? 13 : 14);
+
         if (targetConfirmed) {
-          String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + activeColor + "\",\"mode\":\"" + activeMode + "\",\"status\":\"VERIFIED\",\"sensorVerified\":true,\"id\":\"" + activeTxId + "\"}\n";
+          String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + activeColor + "\",\"mode\":\"" + activeMode + "\",\"status\":\"VERIFIED\",\"sensorVerified\":true,\"sensor\":\"" + colorUpper + "\",\"targetPin\":" + String(targetPin) + ",\"id\":\"" + activeTxId + "\"}\n";
           notifyBLE(ack);
         } else {
-          String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + activeColor + "\",\"mode\":\"" + activeMode + "\",\"status\":\"COMPLETED_UNVERIFIED\",\"sensorVerified\":false,\"id\":\"" + activeTxId + "\"}\n";
+          String ack = "{\"ok\":true,\"ack\":\"sort\",\"color\":\"" + activeColor + "\",\"mode\":\"" + activeMode + "\",\"status\":\"COMPLETED_UNVERIFIED\",\"sensorVerified\":false,\"sensor\":\"" + colorUpper + "\",\"targetPin\":" + String(targetPin) + ",\"id\":\"" + activeTxId + "\"}\n";
           notifyBLE(ack);
         }
 
@@ -315,7 +421,7 @@ void setup() {
   digitalWrite(PIN_LED_STATUS, LOW);
   digitalWrite(PIN_CONVEYOR_BELT, LOW);
 
-  // Inisialisasi sensor sesuai karakteristik hardware ESP32
+  // Inisialisasi 4 sensor fisik sesuai karakteristik hardware ESP32
   pinMode(PIN_SENSOR_MERAH, INPUT_PULLUP);
   pinMode(PIN_SENSOR_BIRU, INPUT_PULLUP);
   pinMode(PIN_SENSOR_KUNING, INPUT); // GPIO 35 input-only tanpa internal pullup
@@ -330,7 +436,7 @@ void setup() {
   servoFlap.write(90);
   servoArm.write(20);
 
-  Serial.println("[VERNOVA] Memulai ESP32 BLE Sorting Server dengan Kontrol Conveyor & ARM...");
+  Serial.println("[VERNOVA] Memulai ESP32 BLE Sorting Server dengan Kontrol Conveyor, ARM & 4 Sensor Fisik...");
 
   BLEDevice::init("VERNOVA-ESP32");
   pServer = BLEDevice::createServer();
@@ -367,21 +473,11 @@ void loop() {
     oldDeviceConnected = deviceConnected;
   }
 
+  // Pembaruan dan filtering debounce seluruh sensor fisik (tetap berjalan meski BLE terputus)
+  updateSensors();
+
   // Eksekusi State Machine kontrol conveyor belt dan lengan robotik ARM
   runStateMachine();
 
-  // Pemantauan telemetri sensor ARM ketika standby
-  if (deviceConnected && currentState == STATE_IDLE) {
-    int currentArmVal = isSensorArmTriggered() ? 1 : 0;
-    if (currentArmVal != lastArmSensorVal) {
-      lastArmSensorVal = currentArmVal;
-      if (currentArmVal == 1) {
-        notifyBLE("SENSOR:OBJECT_PRESENT\n");
-      } else {
-        notifyBLE("SENSOR:OBJECT_ABSENT\n");
-      }
-    }
-  }
-
-  delay(10);
+  delay(5);
 }

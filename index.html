@@ -2406,23 +2406,27 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     if (ev && ev.type === 'sensor_telemetry' && ev.sensorState) {
       const stageVerif = $('tx-stage-verif');
       const manVerif = $('man-verif-pill');
+      const sName = ev.sensorName ? ev.sensorName.toUpperCase() : null;
+      const sPin = ev.pin ? `GPIO ${ev.pin}` : null;
+      const sDesc = sName ? `Sensor ${sName}${sPin ? ' (' + sPin + ')' : ''}` : 'Sensor Fisik';
+
       if (ev.sensorState.objectPresent) {
         if (stageVerif) {
           stageVerif.className = 'pill green';
-          stageVerif.innerText = '3. Sensor: Objek Terdeteksi (VERIFIED)';
+          stageVerif.innerText = `3. ${sDesc}: Objek Terdeteksi (VERIFIED)`;
         }
         if (manVerif) {
-          manVerif.innerText = 'VERIFIKASI: VALID SENSOR';
+          manVerif.innerText = `VERIFIKASI: VALID SENSOR (${sName || 'OK'})`;
           manVerif.className = 'pill green';
         }
         try {
-          logActivity("fas fa-check-circle", "background:rgba(34,197,94,.15);color:#22c55e", "Sensor Fisik Terverifikasi", "Objek terkonfirmasi masuk ke wadah tujuan sortir");
+          logActivity("fas fa-check-circle", "background:rgba(34,197,94,.15);color:#22c55e", `${sDesc} Terverifikasi`, "Objek terkonfirmasi masuk ke wadah tujuan sortir");
         } catch (e) {}
       } else {
         const isTxVerified = Boolean(window.deviceManager && window.deviceManager.currentTransaction && window.deviceManager.currentTransaction.verified);
         if (stageVerif && !isTxVerified) {
           stageVerif.className = 'pill yellow';
-          stageVerif.innerText = '3. Sensor: Objek Belum Terdeteksi';
+          stageVerif.innerText = `3. ${sDesc}: Objek Belum Terdeteksi`;
         }
         if (manVerif && !isTxVerified) {
           manVerif.innerText = 'VERIFIKASI: BELUM TERVERIFIKASI FISIK';

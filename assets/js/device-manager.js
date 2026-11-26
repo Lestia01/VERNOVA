@@ -788,7 +788,13 @@
         state: 'IDLE',
         objectPresent: false,
         lastUpdated: null,
-        raw: ''
+        raw: '',
+        sensors: {
+          merah: { pin: 14, objectPresent: false, lastUpdated: null },
+          biru: { pin: 13, objectPresent: false, lastUpdated: null },
+          kuning: { pin: 35, objectPresent: false, lastUpdated: null },
+          arm: { pin: 34, objectPresent: false, lastUpdated: null }
+        }
       };
       this._sortWaiters = new Map();
       this._mechanismWaiters = new Map();
@@ -906,19 +912,44 @@
       this._handleIncomingData(text);
     }
 
-    _updateSensorState(state, objectPresent, raw) {
-      this.sensorState = {
-        state,
-        objectPresent: Boolean(objectPresent),
-        timestamp: new Date().toISOString(),
-        raw: String(raw || '')
-      };
+    _updateSensorState(state, objectPresent, raw, sensorName = null) {
+      const now = new Date().toISOString();
+      if (!this.sensorState.sensors) {
+        this.sensorState.sensors = {
+          merah: { pin: 14, objectPresent: false, lastUpdated: null },
+          biru: { pin: 13, objectPresent: false, lastUpdated: null },
+          kuning: { pin: 35, objectPresent: false, lastUpdated: null },
+          arm: { pin: 34, objectPresent: false, lastUpdated: null }
+        };
+      }
+
+      if (sensorName) {
+        const sKey = String(sensorName).toLowerCase();
+        if (this.sensorState.sensors[sKey]) {
+          this.sensorState.sensors[sKey].objectPresent = Boolean(objectPresent);
+          this.sensorState.sensors[sKey].lastUpdated = now;
+        }
+      }
+
+      const anyTargetPresent = Object.values(this.sensorState.sensors).some(s => s.objectPresent);
+      const isPresent = Boolean(objectPresent !== undefined ? objectPresent : anyTargetPresent);
+
+      this.sensorState.state = state || (isPresent ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT');
+      this.sensorState.objectPresent = isPresent;
+      this.sensorState.timestamp = now;
+      this.sensorState.lastUpdated = now;
+      this.sensorState.raw = String(raw || '');
+
+      const sLabel = sensorName ? `Sensor ${sensorName.toUpperCase()}` : 'Sensor Fisik';
       this._notify(
         this.status,
-        objectPresent ? 'Sensor Fisik: Objek Terdeteksi' : 'Sensor Fisik: Objek Belum/Tidak Terdeteksi',
+        isPresent ? `${sLabel}: Objek Terdeteksi` : `${sLabel}: Objek Belum/Tidak Terdeteksi`,
         {
           type: 'sensor_telemetry',
-          sensorState: Object.assign({}, this.sensorState)
+          sensorName: sensorName ? sensorName.toLowerCase() : null,
+          pin: sensorName && this.sensorState.sensors[sensorName.toLowerCase()] ? this.sensorState.sensors[sensorName.toLowerCase()].pin : null,
+          objectPresent: isPresent,
+          sensorState: JSON.parse(JSON.stringify(this.sensorState))
         }
       );
     }
@@ -933,13 +964,23 @@
             this.status = CONNECTION_STATES.READY;
           }
 
+          if (json.telemetry === 'sensors') {
+            if (typeof json.merah === 'boolean') this._updateSensorState(null, json.merah, line, 'merah');
+            if (typeof json.biru === 'boolean') this._updateSensorState(null, json.biru, line, 'biru');
+            if (typeof json.kuning === 'boolean') this._updateSensorState(null, json.kuning, line, 'kuning');
+            if (typeof json.arm === 'boolean') this._updateSensorState(null, json.arm, line, 'arm');
+            return;
+          }
+
           if (json.sensor === 'present' || json.sensor === 'OBJECT_PRESENT' || json.objectPresent === true) {
-            this._updateSensorState('OBJECT_PRESENT', true, line);
+            const targetColor = json.targetSensor || json.color || (this._activeSortWaiter ? this._activeSortWaiter.targetColor : null);
+            this._updateSensorState('OBJECT_PRESENT', true, line, targetColor);
             if (this._activeSortWaiter) {
-              this._activeSortWaiter.triggerSensorPresent();
+              this._activeSortWaiter.triggerSensorPresent(targetColor);
             }
           } else if (json.sensor === 'absent' || json.sensor === 'OBJECT_ABSENT' || json.objectPresent === false) {
-            this._updateSensorState('OBJECT_ABSENT', false, line);
+            const targetColor = json.targetSensor || json.color || (this._activeSortWaiter ? this._activeSortWaiter.targetColor : null);
+            this._updateSensorState('OBJECT_ABSENT', false, line, targetColor);
           }
 
           if (json.ack === 'mechanism' || json.cmd === 'mechanism' || json.mechanism) {
@@ -947,12 +988,17 @@
           }
 
           if (json.ack === 'sort' || json.cmd === 'sort' || json.status === 'COMPLETED' || json.status === 'VERIFIED') {
-            const isVerified = Boolean(json.sensorVerified || json.verified || (this.sensorState && this.sensorState.objectPresent));
+            let isVerified = Boolean(json.sensorVerified || json.verified);
+            if (!isVerified && json.sensor && this.sensorState.sensors && this.sensorState.sensors[json.sensor.toLowerCase()]) {
+              isVerified = Boolean(this.sensorState.sensors[json.sensor.toLowerCase()].objectPresent);
+            }
             this._resolveSortWaiter(json.id || json.txId, {
               ok: json.ok !== false,
               status: isVerified ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
               sensorVerified: isVerified,
               verified: isVerified,
+              sensor: json.sensor || null,
+              targetPin: json.targetPin || null,
               raw: json
             });
           }
@@ -962,12 +1008,24 @@
         }
       }
 
-      // 2. Pemrosesan Pesan Teks Protokol ESP32 BLE
+      // 2. Pemrosesan Pesan Telemetri SENSOR:(MERAH|BIRU|KUNING|ARM):(OBJECT_PRESENT|OBJECT_ABSENT)
+      const sensorMatch = line.match(/^SENSOR:(MERAH|BIRU|KUNING|ARM):(OBJECT_PRESENT|OBJECT_ABSENT)$/i);
+      if (sensorMatch) {
+        const sensorName = sensorMatch[1].toLowerCase();
+        const isPresent = sensorMatch[2].toUpperCase() === 'OBJECT_PRESENT';
+        this._updateSensorState(isPresent ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT', isPresent, line, sensorName);
+        if (isPresent && this._activeSortWaiter) {
+          this._activeSortWaiter.triggerSensorPresent(sensorName);
+        }
+        return;
+      }
+
+      // 3. Pemrosesan Pesan Teks Protokol ESP32 BLE
       const upper = line.toUpperCase();
 
       if (upper.includes('STATUS:OBJECT_DETECTED') || upper === 'OBJECT_DETECTED') {
         this.armObjectDetected = true;
-        this._updateSensorState('OBJECT_DETECTED', true, line);
+        this._updateSensorState('OBJECT_DETECTED', true, line, 'arm');
         this._notify(this.status, 'Sensor ARM: Objek Terdeteksi (GPIO 34)', { type: 'stage_update', stage: 'OBJECT_DETECTED' });
         if (this._activeSortWaiter) {
           this._activeSortWaiter.triggerObjectDetected();
@@ -986,14 +1044,17 @@
         }
       } else if (upper.includes('STATUS:TARGET_DETECTED') || upper === 'TARGET_DETECTED') {
         this.targetDetected = true;
-        this._updateSensorState('TARGET_DETECTED', true, line);
-        this._notify(this.status, 'Sensor Tujuan: Objek Terkonfirmasi', { type: 'stage_update', stage: 'TARGET_DETECTED' });
+        const targetColor = this._activeSortWaiter ? this._activeSortWaiter.targetColor : null;
+        this._updateSensorState('TARGET_DETECTED', true, line, targetColor);
+        const sensorLabel = targetColor ? `Sensor ${targetColor.toUpperCase()}` : 'Sensor Tujuan';
+        this._notify(this.status, `${sensorLabel}: Objek Terkonfirmasi`, { type: 'stage_update', stage: 'TARGET_DETECTED' });
         if (this._activeSortWaiter) {
-          this._activeSortWaiter.triggerTargetDetected();
+          this._activeSortWaiter.triggerTargetDetected(targetColor);
         }
       } else if (upper.includes('STATUS:BELT_RESUMED') || upper === 'BELT_RESUMED') {
         this.beltRunning = true;
         this.armObjectDetected = false;
+        this._updateSensorState('OBJECT_ABSENT', false, line, 'arm');
         this._notify(this.status, 'Conveyor Belt: Berjalan Kembali', { type: 'stage_update', stage: 'BELT_RESUMED', beltRunning: true });
         if (this._activeSortWaiter) {
           this._activeSortWaiter.triggerBeltResumed();
@@ -1054,19 +1115,33 @@
       }
     }
 
-    _waitForSortResponse(commandId, timeoutMs = 8000) {
+    _waitForSortResponse(commandId, timeoutMs = 8000, options = {}) {
       return new Promise((resolve, reject) => {
         let settled = false;
         let graceTimer = null;
 
+        const targetColor = options.color ? String(options.color).toLowerCase().trim() : null;
+        const targetMode = options.mode ? String(options.mode).toLowerCase().trim() : null;
+
+        // Cek initial verification khusus untuk sensor warna tujuan bila sudah mendeteksi objek
+        const initialVerified = Boolean(
+          targetColor &&
+          this.sensorState &&
+          this.sensorState.sensors &&
+          this.sensorState.sensors[targetColor] &&
+          this.sensorState.sensors[targetColor].objectPresent
+        );
+
         const waiter = {
           commandId,
-          sensorVerified: Boolean(this.sensorState && this.sensorState.objectPresent),
+          targetColor,
+          targetMode,
+          sensorVerified: initialVerified,
           servoDone: false,
           objectDetected: false,
           beltStopped: false,
           armWorking: false,
-          targetDetected: false,
+          targetDetected: initialVerified,
           beltResumed: false,
           resolve: (result) => {
             if (settled) return;
@@ -1095,9 +1170,11 @@
           triggerArmWorking: () => {
             waiter.armWorking = true;
           },
-          triggerTargetDetected: () => {
-            waiter.targetDetected = true;
-            waiter.sensorVerified = true;
+          triggerTargetDetected: (detectedColor) => {
+            if (!detectedColor || !waiter.targetColor || detectedColor.toLowerCase() === waiter.targetColor.toLowerCase()) {
+              waiter.targetDetected = true;
+              waiter.sensorVerified = true;
+            }
           },
           triggerServoDone: () => {
             waiter.servoDone = true;
@@ -1116,10 +1193,20 @@
               }, 400);
             }
           },
-          triggerSensorPresent: () => {
-            waiter.sensorVerified = true;
-            waiter.targetDetected = true;
-            if (waiter.servoDone) {
+          triggerSensorPresent: (sensorName) => {
+            if (!sensorName) {
+              waiter.sensorVerified = true;
+              waiter.targetDetected = true;
+            } else {
+              const sNorm = String(sensorName).toLowerCase();
+              if (waiter.targetColor && sNorm === waiter.targetColor.toLowerCase()) {
+                waiter.sensorVerified = true;
+                waiter.targetDetected = true;
+              } else if (sNorm === 'arm') {
+                waiter.objectDetected = true;
+              }
+            }
+            if (waiter.servoDone && waiter.sensorVerified) {
               waiter.resolve({ ok: true, sensorVerified: true, verified: true, status: 'VERIFIED' });
             }
           },
@@ -1281,7 +1368,7 @@
         const payload = JSON.stringify({ cmd: 'sort', color, mode, class: canonicalClass, id: commandId });
         
         // Buat waiter untuk menunggu respons ACK / sensor fisik dari ESP32
-        const sortPromise = this._waitForSortResponse(commandId, timeoutMs);
+        const sortPromise = this._waitForSortResponse(commandId, timeoutMs, { color, mode });
         
         await this._writeBLE(payload);
         
@@ -2060,10 +2147,19 @@
         tx.durationMs = Date.now() - startTime;
 
         // TAHAP 3: Verifikasi Sensor Fisik
+        const colorSensorPresent = Boolean(
+          this.activeAdapter &&
+          this.activeAdapter.sensorState &&
+          this.activeAdapter.sensorState.sensors &&
+          this.activeAdapter.sensorState.sensors[normColor] &&
+          this.activeAdapter.sensorState.sensors[normColor].objectPresent
+        );
+
         const hasSensorVerification = Boolean(
           sortResp.sensorVerified === true ||
           sortResp.verified === true ||
           tx.sensorVerified === true ||
+          colorSensorPresent ||
           (this.activeAdapter && this.activeAdapter.sensorState && this.activeAdapter.sensorState.objectPresent && this.activeAdapter.sensorState.lastTxId === txId)
         );
         if (hasSensorVerification) {
