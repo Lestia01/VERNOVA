@@ -3,6 +3,9 @@
   <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
 <meta name="theme-color" content="#1a2456">
 <meta name="description" content="R-LAB — Smart Sorting Factory Dashboard. Real-time object sorting analytics, mobile drawer menu, desktop sidebar navigation.">
 <link rel="icon" type="image/png" href="logo.png">
@@ -2506,6 +2509,8 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     const menu = $('connect-dropdown-menu');
     if (menu) {
       menu.classList.toggle('hidden');
+    } else {
+      window.openDeviceManagerModal();
     }
   };
 
@@ -2538,12 +2543,16 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     }
   });
 
-  // Backward-compatible aliases
-  window.connectBluetooth = window.connectCurrentDevice;
+  // Backward-compatible aliases (Buka pemilih koneksi, jangan langsung bypass ke bluetooth)
+  window.connectBluetooth = (e) => {
+    const menu = $('connect-dropdown-menu');
+    if (menu) window.toggleConnectDropdown(e);
+    else window.openDeviceManagerModal();
+  };
+  window.connectDevice = window.connectBluetooth;
+  window.saveAndConnectDevice = window.connectBluetooth;
   window.disconnectBluetooth = window.disconnectCurrentDevice;
-  window.connectDevice = window.connectCurrentDevice;
   window.disconnectDevice = window.disconnectCurrentDevice;
-  window.saveAndConnectDevice = window.connectCurrentDevice;
   window.pingCurrentDevice = window.sendTestPulseCurrentDevice;
   window.toggleEsp32Sim = window.toggleDeviceSim;
   window.pingEsp32 = window.sendTestPulseCurrentDevice;
