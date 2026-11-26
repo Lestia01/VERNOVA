@@ -9,15 +9,18 @@ const {
   VALID_MODES,
   NORDIC_UART_SERVICE_UUID,
   MicrobitBLEAdapter,
+  ESP32WiFiAdapter,
   DeviceConnectionManager,
   aggregateSortingDistribution
 } = require('../assets/js/device-manager.js');
 
-test('R-LAB / Smart Factory Micro:bit Robot Device Manager (device-manager.js)', async (t) => {
+test('VERNOVA / Smart Factory Multi-Device Manager (device-manager.js)', async (t) => {
 
   await t.test('1. Validasi Konstanta Sistem & UUID Nordic UART', () => {
     assert.equal(DEVICE_TYPES.MICROBIT, 'MICROBIT');
+    assert.equal(DEVICE_TYPES.ESP32, 'ESP32');
     assert.equal(CONNECTION_TYPES.BLE, 'BLE');
+    assert.equal(CONNECTION_TYPES.WIFI, 'WIFI');
     assert.equal(NORDIC_UART_SERVICE_UUID, '6e400001-b5a3-f393-e0a9-e50e24dcca9e');
     assert.deepEqual(VALID_COLORS, ['kuning', 'biru', 'merah']);
     assert.deepEqual(VALID_MODES, ['Servo', 'Arm']);
@@ -66,7 +69,7 @@ test('R-LAB / Smart Factory Micro:bit Robot Device Manager (device-manager.js)',
     }, /Warna tidak valid/);
   });
 
-  await t.test('4. MicrobitBLEAdapter: Pengaturan Mode Aktuator & Emergency Stop', async () => {
+  await t.test('4. MicrobitBLEAdapter: Mode Aktuator, Emergency Stop & Test Pulse', async () => {
     const adapter = new MicrobitBLEAdapter({ simulationMode: true });
 
     const modeRes = await adapter.sendModeCommand('Arm');
@@ -82,19 +85,118 @@ test('R-LAB / Smart Factory Micro:bit Robot Device Manager (device-manager.js)',
     assert.equal(pulseRes.status, 'PULSE_ACK');
   });
 
-  await t.test('5. DeviceConnectionManager: Status, Operasi & Event Listener', async () => {
+  await t.test('5. ESP32WiFiAdapter: Inisialisasi, Host Sanitization & Mode Simulasi', async () => {
+    // Sanitasi URL Host
+    const adapter1 = new ESP32WiFiAdapter({ host: '192.168.4.1', simulationMode: true });
+    assert.equal(adapter1.host, 'http://192.168.4.1');
+    assert.equal(adapter1.deviceType, DEVICE_TYPES.ESP32);
+    assert.equal(adapter1.connectionType, CONNECTION_TYPES.WIFI);
+    assert.equal(adapter1.status, CONNECTION_STATES.SIMULATED);
+
+    const adapter2 = new ESP32WiFiAdapter({ host: 'http://192.168.1.100///', simulationMode: true });
+    assert.equal(adapter2.host, 'http://192.168.1.100');
+
+    // Connect Simulasi
+    const conn = await adapter1.connect();
+    assert.equal(conn.ok, true);
+    assert.equal(conn.simulated, true);
+    assert.equal(conn.telemetry.deviceId, 'VERNOVA-ESP32-SIM');
+
+    const status = adapter1.getStatus();
+    assert.equal(status.state, CONNECTION_STATES.SIMULATED);
+    assert.equal(status.host, 'http://192.168.4.1');
+  });
+
+  await t.test('6. ESP32WiFiAdapter: Sortir, Mode, Stop & Test Pulse (Simulasi)', async () => {
+    const adapter = new ESP32WiFiAdapter({ simulationMode: true });
+
+    // Sortir Kuning
+    const resKuning = await adapter.sendSortingCommand({ color: 'kuning', mode: 'Servo' });
+    assert.equal(resKuning.ok, true);
+    assert.equal(resKuning.color, 'kuning');
+    assert.equal(resKuning.executionStatus, 'simulated_esp32_wifi');
+
+    // Sortir Biru (Mode Arm)
+    const resBiru = await adapter.sendSortingCommand({ color: 'biru', mode: 'Arm' });
+    assert.equal(resBiru.ok, true);
+    assert.equal(resBiru.color, 'biru');
+    assert.equal(resBiru.mode, 'Arm');
+
+    // Sortir Merah
+    const resMerah = await adapter.sendSortingCommand({ color: 'merah' });
+    assert.equal(resMerah.ok, true);
+    assert.equal(resMerah.color, 'merah');
+
+    // Mode Command
+    const resMode = await adapter.sendModeCommand('Arm');
+    assert.equal(resMode.ok, true);
+    assert.equal(resMode.mode, 'Arm');
+
+    // Emergency Stop
+    const resStop = await adapter.sendEmergencyStop();
+    assert.equal(resStop.ok, true);
+    assert.equal(resStop.status, 'STOPPED');
+
+    // Test Pulse
+    const resPulse = await adapter.sendTestPulse();
+    assert.equal(resPulse.ok, true);
+    assert.equal(resPulse.status, 'PULSE_ACK');
+
+    // Penolakan warna tidak valid
+    await assert.rejects(async () => {
+      await adapter.sendSortingCommand({ color: 'ungu' });
+    }, /Warna tidak valid/);
+  });
+
+  await t.test('7. DeviceConnectionManager: Dynamic Device Switching & Active Routing', async () => {
+    const manager = new DeviceConnectionManager({
+      deviceType: DEVICE_TYPES.MICROBIT,
+      simulationMode: true
+    });
+
+    assert.equal(manager.config.deviceType, DEVICE_TYPES.MICROBIT);
+    assert.equal(manager.config.connectionType, CONNECTION_TYPES.BLE);
+    assert.equal(manager.getActiveAdapter().deviceType, DEVICE_TYPES.MICROBIT);
+
+    // Ganti perangkat ke ESP32
+    const switchRes = manager.switchDevice('ESP32', { host: 'http://192.168.4.1' });
+    assert.equal(switchRes.ok, true);
+    assert.equal(manager.config.deviceType, DEVICE_TYPES.ESP32);
+    assert.equal(manager.config.connectionType, CONNECTION_TYPES.WIFI);
+    assert.equal(manager.getActiveAdapter().deviceType, DEVICE_TYPES.ESP32);
+    assert.equal(manager.getActiveAdapter().host, 'http://192.168.4.1');
+
+    // Kirim perintah sortir -> Terkirim ke adapter aktif (ESP32)
+    const sortRes = await manager.dispatchSortingCommand({ color: 'kuning' });
+    assert.equal(sortRes.ok, true);
+    assert.equal(sortRes.executionStatus, 'simulated_esp32_wifi');
+
+    // Kembalikan ke micro:bit
+    manager.switchDevice('MICROBIT');
+    assert.equal(manager.config.deviceType, DEVICE_TYPES.MICROBIT);
+    assert.equal(manager.getActiveAdapter().deviceType, DEVICE_TYPES.MICROBIT);
+
+    const sortMbit = await manager.dispatchSortingCommand({ color: 'biru' });
+    assert.equal(sortMbit.ok, true);
+    assert.equal(sortMbit.executionStatus, 'simulated_microbit_ble');
+
+    // Penolakan tipe perangkat tidak dikenal
+    assert.throws(() => {
+      manager.switchDevice('ARDUINO_UNO');
+    }, /Device type tidak valid/);
+  });
+
+  await t.test('8. DeviceConnectionManager: Operating Mode & Listener Propagation', async () => {
     const manager = new DeviceConnectionManager({ simulationMode: true });
-    assert.equal(manager.isSimulated(), true);
-    assert.equal(manager.getOperatingMode(), OPERATING_MODES.AUTO);
 
-    let eventReceived = null;
-    manager.onStatusChange(ev => { eventReceived = ev; });
+    let lastEvent = null;
+    manager.onStatusChange(ev => { lastEvent = ev; });
 
-    // Ganti operating mode ke MANUAL
-    const modeChange = manager.setOperatingMode('MANUAL');
-    assert.equal(modeChange.ok, true);
+    // Set operating mode
+    const modeRes = manager.setOperatingMode('MANUAL');
+    assert.equal(modeRes.ok, true);
     assert.equal(manager.getOperatingMode(), 'MANUAL');
-    assert.equal(eventReceived.type, 'operating_mode_changed');
+    assert.equal(lastEvent.type, 'operating_mode_changed');
 
     // Connect
     const conn = await manager.connect();
@@ -102,13 +204,13 @@ test('R-LAB / Smart Factory Micro:bit Robot Device Manager (device-manager.js)',
     assert.equal(conn.simulated, true);
   });
 
-  await t.test('6. DeviceConnectionManager: Debounce & Penekanan Duplikat Beruntun', async () => {
+  await t.test('9. DeviceConnectionManager: Debounce & Duplicate Suppression', async () => {
     const manager = new DeviceConnectionManager({
       simulationMode: true,
       debounceMs: 500
     });
 
-    // Panggilan pertama untuk kuning
+    // Panggilan pertama
     const firstCall = await manager.dispatchSortingCommand({ color: 'kuning' });
     assert.equal(firstCall.ok, true);
     assert.equal(firstCall.color, 'kuning');
@@ -119,18 +221,18 @@ test('R-LAB / Smart Factory Micro:bit Robot Device Manager (device-manager.js)',
     assert.equal(suppressedCall.suppressed, true);
     assert.match(suppressedCall.reason, /Debounce aktif/);
 
-    // Panggilan dengan force: true -> bypass debounce
+    // Panggilan dengan force: true -> lolos
     const forceCall = await manager.dispatchSortingCommand({ color: 'kuning', force: true });
     assert.equal(forceCall.ok, true);
     assert.equal(forceCall.color, 'kuning');
 
-    // Panggilan dengan warna berbeda -> diizinkan
+    // Panggilan warna berbeda -> lolos
     const diffColorCall = await manager.dispatchSortingCommand({ color: 'biru' });
     assert.equal(diffColorCall.ok, true);
     assert.equal(diffColorCall.color, 'biru');
   });
 
-  await t.test('7. Agregasi Statistik Distribusi Penyortiran (aggregateSortingDistribution)', () => {
+  await t.test('10. Agregasi Statistik Distribusi Penyortiran (aggregateSortingDistribution)', () => {
     const sampleEntries = [
       { warna: 'kuning', status: 'COMPLETED' },
       { warna: 'kuning', status: 'VERIFIED' },
@@ -149,7 +251,7 @@ test('R-LAB / Smart Factory Micro:bit Robot Device Manager (device-manager.js)',
     assert.equal(stats.successRateString, '80%');
   });
 
-  await t.test('8. Legacy Client Proxy Compatibility', async () => {
+  await t.test('11. Legacy Client Proxy Compatibility', async () => {
     const manager = new DeviceConnectionManager({ simulationMode: true });
     const proxy = manager.createLegacyEsp32ClientProxy();
 

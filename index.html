@@ -717,7 +717,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         <img src="logo.png" alt="Logo R-LAB" class="w-9 h-9 rounded-lg shrink-0 lg:hidden" style="object-fit:cover;border:1px solid var(--border)">
 
         <div class="status-group" role="status" aria-label="Status koneksi">
-          <div id="status-bt" class="pill" onclick="window.toggleDeviceSim()" title="micro:bit Connection Status (Klik untuk Toggle Simulasi/Fisik)" style="cursor:pointer">BT: OFFLINE</div>
+          <div id="status-bt" class="pill" onclick="window.openDeviceManagerModal()" title="Robot Controller Status (Klik untuk Konfigurasi Perangkat)" style="cursor:pointer">ROBOT: OFFLINE</div>
           <div id="status-fb" class="pill">FB: OFFLINE</div>
           <div id="status-tm" class="pill">AI: STANDBY</div>
           <div id="status-engine-pill" class="pill on" title="Active AI Vision Engine">ENGINE: TM</div>
@@ -733,10 +733,14 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <i class="fas fa-database text-xs"></i>
           </button>
 
-          <button id="btn-conn-bt" onclick="window.connectBluetooth()" class="btn-primary px-3 py-2 text-[10px] flex items-center gap-2" title="Connect BBC micro:bit">
-            <i class="fab fa-bluetooth-b"></i><span class="hidden sm:inline" data-i18n="btn.connect">CONNECT</span>
+          <button onclick="window.openDeviceManagerModal()" class="icon-btn" title="Hardware Controller (micro:bit / ESP32)">
+            <i class="fas fa-microchip text-xs"></i>
           </button>
-          <button id="btn-dis-bt" onclick="window.disconnectBluetooth()" disabled class="icon-btn danger" title="Disconnect micro:bit">
+
+          <button id="btn-conn-bt" onclick="window.connectCurrentDevice()" class="btn-primary px-3 py-2 text-[10px] flex items-center gap-2" title="Connect Robot Device">
+            <i id="btn-device-icon" class="fab fa-bluetooth-b"></i><span id="btn-device-label" class="hidden sm:inline">CONNECT</span>
+          </button>
+          <button id="btn-dis-bt" onclick="window.disconnectCurrentDevice()" disabled class="icon-btn danger hidden" title="Disconnect Robot Device">
             <i class="fas fa-xmark text-xs"></i>
           </button>
 
@@ -819,7 +823,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
               <!-- 1. Perangkat Tujuan -->
               <div>
                 <label class="text-[11px] font-bold t-muted block mb-1">Perangkat Target</label>
-                <div class="inp text-xs font-bold flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 cursor-default">
+                <div id="man-device-display" class="inp text-xs font-bold flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 cursor-default">
                   <i class="fab fa-bluetooth-b text-indigo-500"></i>
                   <span>BBC micro:bit (Bluetooth UART)</span>
                 </div>
@@ -1624,46 +1628,99 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
 
 
-  <!-- ===================== MODAL: BBC MICRO:BIT BLUETOOTH ===================== -->
+  <!-- ===================== MODAL: HARDWARE CONTROLLER (MICRO:BIT & ESP32) ===================== -->
   <div id="microbit-modal" class="modal">
     <div class="modal-backdrop" onclick="window.closeModal('microbit-modal')"></div>
-    <div class="modal-panel max-w-md">
+    <div class="modal-panel max-w-lg">
       <div class="flex items-center justify-between mb-4">
         <div class="flex items-center gap-2.5">
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white shadow-sm bg-blue-600">
-            <i class="fab fa-bluetooth-b text-sm"></i>
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white shadow-sm bg-blue-600" id="modal-device-badge-icon">
+            <i class="fas fa-microchip text-sm"></i>
           </div>
           <div>
-            <h3 class="font-black text-sm sm:text-base leading-tight t-main">BBC micro:bit Controller</h3>
-            <p class="text-[10px] t-muted">Web Bluetooth UART Service (6E400001)</p>
+            <h3 class="font-black text-sm sm:text-base leading-tight t-main">Hardware Controller (Robot Sortir)</h3>
+            <p class="text-[10px] t-muted">Pilih perangkat target: BBC micro:bit (BLE) atau ESP32 (Wi-Fi)</p>
           </div>
         </div>
         <button onclick="window.closeModal('microbit-modal')" class="icon-btn" aria-label="Tutup"><i class="fas fa-xmark text-xs"></i></button>
       </div>
 
-      <div class="space-y-3 mb-4 text-xs">
-        <div class="p-3 rounded-xl border bg-slate-50 dark:bg-slate-900/50 space-y-2" style="border-color:var(--border)">
-          <div class="flex items-center justify-between">
-            <span class="font-bold">Status Perangkat:</span>
-            <span id="mbit-modal-status" class="pill gray">OFFLINE</span>
+      <!-- Selector 2 Perangkat (Radio Cards) -->
+      <div class="grid grid-cols-2 gap-2.5 mb-4">
+        <div id="opt-card-microbit" onclick="window.onSelectDeviceType('MICROBIT')" class="device-opt-card p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20">
+          <div class="flex items-center gap-2 mb-1">
+            <i class="fab fa-bluetooth-b text-blue-600 text-sm"></i>
+            <span class="font-black text-xs">BBC micro:bit</span>
           </div>
-          <div class="flex items-center justify-between pt-1 border-t" style="border-color:var(--border)">
-            <div>
-              <span class="font-bold block">Mode Simulasi Virtual:</span>
-              <span class="text-[10px] t-muted">Gunakan jika tidak ada hardware fisik micro:bit</span>
-            </div>
-            <input type="checkbox" id="mbit-sim-toggle" onchange="window.toggleDeviceSim(this.checked)" class="toggle-checkbox">
-          </div>
+          <p class="text-[10px] t-muted">Bluetooth Low Energy (MakeCode UART)</p>
         </div>
-        <p class="text-[11px] t-muted leading-relaxed">
-          Hubungkan website ke robot BBC micro:bit melalui Bluetooth Low Energy untuk menggerakkan servo/arm sesuai hasil klasifikasi AI (Teachable Machine / YOLO).
-        </p>
+
+        <div id="opt-card-esp32" onclick="window.onSelectDeviceType('ESP32')" class="device-opt-card p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100">
+          <div class="flex items-center gap-2 mb-1">
+            <i class="fas fa-wifi text-indigo-600 text-sm"></i>
+            <span class="font-black text-xs">ESP32 DevKit V1</span>
+          </div>
+          <p class="text-[10px] t-muted">Wi-Fi Local Network (HTTP REST API)</p>
+        </div>
       </div>
 
+      <!-- Konfigurasi micro:bit (BLE) -->
+      <div id="sec-config-microbit" class="space-y-3 mb-4 text-xs">
+        <div class="p-3 rounded-xl border bg-slate-50 dark:bg-slate-900/50 space-y-2" style="border-color:var(--border)">
+          <div class="flex items-center justify-between">
+            <span class="font-bold">Status micro:bit:</span>
+            <span id="mbit-modal-status" class="pill gray">OFFLINE</span>
+          </div>
+          <p class="text-[11px] t-muted">
+            Berkomunikasi via Nordic UART Service (UUID: <code class="font-mono text-[10px]">6e400001-...</code>). Buka Google Chrome/Edge dan pastikan Bluetooth PC aktif.
+          </p>
+        </div>
+      </div>
+
+      <!-- Konfigurasi ESP32 (Wi-Fi) -->
+      <div id="sec-config-esp32" class="space-y-3 mb-4 text-xs hidden">
+        <div class="p-3 rounded-xl border bg-slate-50 dark:bg-slate-900/50 space-y-3" style="border-color:var(--border)">
+          <div class="flex items-center justify-between">
+            <span class="font-bold">Status ESP32 Wi-Fi:</span>
+            <span id="esp32-modal-status" class="pill gray">OFFLINE</span>
+          </div>
+          <div>
+            <label class="text-[11px] font-bold t-muted block mb-1">Alamat IP / Host ESP32:</label>
+            <div class="flex items-center gap-2">
+              <input type="text" id="esp32-host-input" value="http://192.168.4.1" placeholder="http://192.168.4.1" class="inp text-xs font-mono font-bold flex-1">
+              <button type="button" onclick="window.sendTestPulseCurrentDevice()" class="btn-ghost px-2.5 py-2 text-xs border font-bold flex items-center gap-1" title="Kirim Test Pulse Ping">
+                <i class="fas fa-wave-square text-xs"></i><span>Ping</span>
+              </button>
+            </div>
+            <span class="text-[10px] t-muted mt-1 block">Default Access Point: <code class="font-mono">http://192.168.4.1</code> atau masukkan IP router lokal ESP32 Anda.</span>
+          </div>
+
+          <div id="esp32-telemetry-box" class="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[10px] text-emerald-800 dark:text-emerald-200 hidden">
+            <div class="flex items-center gap-1.5 font-bold mb-0.5"><i class="fas fa-circle-check text-emerald-600"></i><span>Telemetri ESP32 Aktif:</span></div>
+            <div id="esp32-telemetry-text" class="font-mono text-[9px] truncate">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mode Simulasi Virtual (Berlaku untuk perangkat aktif apa pun) -->
+      <div class="p-3 rounded-xl border bg-slate-50 dark:bg-slate-900/50 mb-4 text-xs" style="border-color:var(--border)">
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="font-bold block">Mode Simulasi Virtual Hardware:</span>
+            <span class="text-[10px] t-muted">Gunakan jika tidak ada hardware fisik aktif (pengujian simulasi otomatis)</span>
+          </div>
+          <input type="checkbox" id="mbit-sim-toggle" onchange="window.toggleDeviceSim(this.checked)" class="toggle-checkbox">
+        </div>
+      </div>
+
+      <!-- Tombol Aksi Modal -->
       <div class="flex gap-2 justify-end pt-2 border-t" style="border-color:var(--border)">
-        <button type="button" onclick="window.disconnectBluetooth(); window.closeModal('microbit-modal');" class="btn-ghost px-3 py-2 text-xs">Putuskan</button>
-        <button type="button" onclick="window.connectBluetooth(); window.closeModal('microbit-modal');" class="btn-primary px-4 py-2 text-xs font-bold flex items-center gap-1.5">
-          <i class="fab fa-bluetooth-b"></i><span>Hubungkan micro:bit</span>
+        <button type="button" onclick="window.disconnectCurrentDevice();" class="btn-ghost px-3 py-2 text-xs">Putuskan</button>
+        <button type="button" onclick="window.reconnectCurrentDevice();" class="btn-ghost px-3 py-2 text-xs font-bold text-blue-600 dark:text-blue-400">
+          <i class="fas fa-arrows-rotate mr-1"></i><span>Reconnect</span>
+        </button>
+        <button type="button" onclick="window.connectCurrentDevice();" class="btn-primary px-4 py-2 text-xs font-bold flex items-center gap-1.5">
+          <i class="fas fa-plug"></i><span>Hubungkan Perangkat</span>
         </button>
       </div>
     </div>
@@ -2119,75 +2176,244 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     const pill = $('status-bt') || $('status-esp32');
     const btnConn = $('btn-conn-bt');
     const btnDis = $('btn-dis-bt');
-    const modalStatus = $('mbit-modal-status');
-    const simBadge = $('sim-active-badge');
+    const btnIcon = $('btn-device-icon');
+    const btnLabel = $('btn-device-label');
+    const txDevice = $('tx-status-device');
+    const manDevice = $('man-device-display');
+
+    const cfg = window.deviceManager ? window.deviceManager.config : { deviceType: 'MICROBIT' };
+    const devType = cfg.deviceType || 'MICROBIT';
+    const isEsp = devType === 'ESP32';
+    const devName = isEsp ? 'ESP32' : 'micro:bit';
+    const connShort = isEsp ? 'Wi-Fi' : 'BLE';
 
     const st = (ev && ev.status) || (window.deviceManager && typeof window.deviceManager.getStatus === 'function' ? window.deviceManager.getStatus().state : 'DISCONNECTED');
     const isSim = window.deviceManager && typeof window.deviceManager.isSimulated === 'function' ? window.deviceManager.isSimulated() : false;
 
+    // 1. Update Topbar pill
     if (pill) {
       if (st === 'CONNECTED' || st === 'READY') {
-        setPill(pill, 'blue', 'micro:bit: ON');
+        setPill(pill, 'blue', `${devName} (${connShort}): ON`);
       } else if (st === 'BUSY') {
-        setPill(pill, 'warn', 'micro:bit: BUSY');
+        setPill(pill, 'warn', `${devName}: BUSY`);
       } else if (st === 'SIMULATED' || isSim) {
-        setPill(pill, 'on', 'micro:bit: SIMULASI');
+        setPill(pill, 'on', `${devName}: SIMULASI`);
       } else if (st === 'CONNECTING') {
-        setPill(pill, 'warn', 'micro:bit: CONNECTING...');
+        setPill(pill, 'warn', `${devName}: CONNECTING...`);
+      } else if (st === 'RECONNECTING') {
+        setPill(pill, 'warn', `${devName}: RECONNECTING...`);
       } else {
-        setPill(pill, 'off', 'micro:bit: OFFLINE');
+        setPill(pill, 'off', `${devName}: OFFLINE`);
       }
     }
 
+    // 2. Update Topbar connect/disconnect buttons
     if (btnConn && btnDis) {
       if (st === 'CONNECTED' || st === 'READY' || isSim) {
         btnConn.classList.add('hidden');
         btnDis.classList.remove('hidden');
+        btnDis.removeAttribute('disabled');
       } else {
         btnConn.classList.remove('hidden');
         btnDis.classList.add('hidden');
       }
     }
 
-    if (modalStatus) {
-      modalStatus.innerText = isSim ? 'SIMULASI' : st;
-      modalStatus.className = (st === 'CONNECTED' || st === 'READY' || isSim)
-        ? 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-        : 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200';
+    if (btnIcon && btnLabel) {
+      btnIcon.className = isEsp ? 'fas fa-wifi' : 'fab fa-bluetooth-b';
+      btnLabel.innerText = `CONNECT ${devName.toUpperCase()}`;
     }
 
-    if (simBadge) simBadge.classList.toggle('hidden', !isSim);
+    // 3. Update Live Transaction & Manual Panel Displays
+    if (txDevice) {
+      txDevice.className = isEsp ? 'pill indigo font-bold' : 'pill blue font-bold';
+      txDevice.innerHTML = isEsp ? '<i class="fas fa-wifi"></i> ESP32 Wi-Fi Robot' : '<i class="fab fa-bluetooth-b"></i> micro:bit Robot';
+    }
+
+    if (manDevice) {
+      manDevice.innerHTML = isEsp 
+        ? '<i class="fas fa-wifi text-indigo-500 mr-1.5"></i><span>ESP32 DevKit V1 (Wi-Fi REST)</span>'
+        : '<i class="fab fa-bluetooth-b text-indigo-500 mr-1.5"></i><span>BBC micro:bit (Bluetooth UART)</span>';
+    }
+
+    // 4. Update Modal Elements
+    const mbitStatus = $('mbit-modal-status');
+    const esp32Status = $('esp32-modal-status');
+    const esp32Telem = $('esp32-telemetry-box');
+    const simToggle = $('mbit-sim-toggle');
+    const hostInput = $('esp32-host-input');
+
+    if (hostInput && cfg.host && !hostInput.matches(':focus')) {
+      hostInput.value = cfg.host;
+    }
+
+    if (mbitStatus) {
+      mbitStatus.innerText = isSim ? 'SIMULASI' : (!isEsp ? st : 'OFFLINE');
+      mbitStatus.className = (!isEsp && (st === 'CONNECTED' || st === 'READY' || isSim))
+        ? 'pill green font-bold'
+        : 'pill gray font-bold';
+    }
+
+    if (esp32Status) {
+      esp32Status.innerText = isSim ? 'SIMULASI' : (isEsp ? st : 'OFFLINE');
+      esp32Status.className = (isEsp && (st === 'CONNECTED' || st === 'READY' || isSim))
+        ? 'pill green font-bold'
+        : (isEsp && (st === 'CONNECTING' || st === 'RECONNECTING') 
+          ? 'pill yellow font-bold' 
+          : (isEsp && st === 'ERROR' ? 'pill red font-bold' : 'pill gray font-bold'));
+    }
+
+    if (esp32Telem) {
+      const activeAdapter = window.deviceManager ? window.deviceManager.getActiveAdapter() : null;
+      const telem = activeAdapter ? activeAdapter.lastTelemetry : null;
+      if (isEsp && (st === 'CONNECTED' || isSim) && telem) {
+        esp32Telem.classList.remove('hidden');
+        const telemText = $('esp32-telemetry-text');
+        if (telemText) {
+          telemText.innerText = `ID: ${telem.deviceId || 'ESP32'} | Host: ${telem.host || cfg.host} | Heap: ${telem.freeHeap ? Math.round(telem.freeHeap/1024) + ' KB' : 'OK'} | Uptime: ${telem.uptimeSec ? telem.uptimeSec + 's' : 'Aktif'}`;
+        }
+      } else {
+        esp32Telem.classList.add('hidden');
+      }
+    }
+
+    if (simToggle) {
+      simToggle.checked = Boolean(isSim);
+    }
   }
 
-  /* Web Bluetooth micro:bit connection */
-  window.connectBluetooth = async () => {
-    showToast(state.lang === 'id' ? "Menghubungkan ke micro:bit Bluetooth..." : "Connecting to micro:bit Bluetooth...");
+  /* Universal Connect Handler */
+  window.connectCurrentDevice = async () => {
+    const dev = window.deviceManager?.config?.deviceType || 'MICROBIT';
+    const isEsp = dev === 'ESP32';
+    showToast(state.lang === 'id' ? `Menghubungkan ke ${isEsp ? 'ESP32 Wi-Fi' : 'micro:bit Bluetooth'}...` : `Connecting to ${isEsp ? 'ESP32 Wi-Fi' : 'micro:bit Bluetooth'}...`);
     try {
+      if (isEsp) {
+        const hostInput = $('esp32-host-input');
+        if (hostInput && hostInput.value.trim()) {
+          window.deviceManager.setHost(hostInput.value.trim());
+        }
+      }
       const res = await window.deviceManager.connect();
       if (res && res.ok) {
         showToast(state.lang === 'id'
-          ? `Sukses Terhubung ke micro:bit! (${res.simulated ? 'Mode Simulasi' : (res.telemetry?.deviceId || 'Online')})`
-          : `Connected to micro:bit!`);
-        logActivity("fas fa-plug-circle-check", "background:rgba(34,197,94,.15);color:#22c55e", "micro:bit Connected", res.simulated ? "Mode Simulasi" : (res.telemetry?.deviceId || "BLE UART"));
+          ? `Sukses Terhubung ke ${isEsp ? 'ESP32 Wi-Fi' : 'micro:bit'}! (${res.simulated ? 'Mode Simulasi' : (res.telemetry?.deviceId || 'Online')})`
+          : `Connected to ${isEsp ? 'ESP32 Wi-Fi' : 'micro:bit'}!`);
+        logActivity("fas fa-plug-circle-check", "background:rgba(34,197,94,.15);color:#22c55e", `${dev} Connected`, res.simulated ? "Mode Simulasi" : (res.telemetry?.deviceId || (isEsp ? window.deviceManager.config.host : "BLE UART")));
         window.closeModal('microbit-modal');
       } else {
         showToast((state.lang === 'id' ? "Gagal tersambung: " : "Connection failed: ") + (res?.error || 'Offline'));
       }
     } catch (err) {
-      showToast("Error Bluetooth: " + err.message);
+      showToast("Error koneksi: " + err.message);
     }
   };
 
-  window.disconnectBluetooth = async () => {
-    await window.deviceManager.disconnect();
-    showToast(state.lang === 'id' ? "Koneksi micro:bit diputuskan." : "micro:bit disconnected.");
-    logActivity("fas fa-power-off", "background:rgba(239,68,68,.15);color:#ef4444", "micro:bit Disconnected", "Manual disconnect");
+  /* Reconnect ESP32 */
+  window.reconnectCurrentDevice = async () => {
+    showToast(state.lang === 'id' ? "Mencoba menghubungkan ulang ke ESP32..." : "Reconnecting to ESP32...");
+    try {
+      const res = await window.deviceManager.reconnect();
+      if (res && res.ok) {
+        showToast(state.lang === 'id' ? "ESP32 berhasil terhubung kembali!" : "ESP32 reconnected successfully!");
+        logActivity("fas fa-arrows-rotate", "background:rgba(34,197,94,.15);color:#22c55e", "ESP32 Reconnected", window.deviceManager.config.host);
+      } else {
+        showToast("Reconnect gagal: " + (res?.error || 'Perangkat tidak merespons'));
+      }
+    } catch (e) {
+      showToast("Error reconnect: " + e.message);
+    }
   };
 
+  /* Disconnect Handler */
+  window.disconnectCurrentDevice = async () => {
+    const dev = window.deviceManager?.config?.deviceType || 'MICROBIT';
+    await window.deviceManager.disconnect();
+    showToast(state.lang === 'id' ? `Koneksi ${dev} diputuskan.` : `${dev} disconnected.`);
+    logActivity("fas fa-power-off", "background:rgba(239,68,68,.15);color:#ef4444", `${dev} Disconnected`, "Manual disconnect");
+  };
+
+  /* Test Pulse Handler */
+  window.sendTestPulseCurrentDevice = async () => {
+    showToast(state.lang === 'id' ? "Mengirim sinyal uji test pulse..." : "Sending test pulse...");
+    try {
+      const res = await window.deviceManager.sendTestPulse();
+      if (res && res.ok) {
+        showToast(state.lang === 'id' ? "Perangkat merespons test pulse!" : "Test pulse acknowledged!");
+        logActivity("fas fa-wave-square", "background:rgba(99,102,241,.15);color:#6366f1", "Test Pulse OK", window.deviceManager.config.deviceType);
+      } else {
+        showToast("Test pulse gagal: " + (res?.error || 'No response'));
+      }
+    } catch (e) {
+      showToast("Error test pulse: " + e.message);
+    }
+  };
+
+  /* Switch Device UI Handler */
+  window.onSelectDeviceType = (devType) => {
+    if (!window.deviceManager || typeof window.deviceManager.switchDevice !== 'function') return;
+    const isEsp = devType === 'ESP32';
+    const hostInput = $('esp32-host-input');
+    const host = hostInput ? hostInput.value.trim() : null;
+
+    window.deviceManager.switchDevice(devType, { host });
+
+    // Update option card styles
+    const cardMbit = $('opt-card-microbit');
+    const cardEsp = $('opt-card-esp32');
+    const secMbit = $('sec-config-microbit');
+    const secEsp = $('sec-config-esp32');
+
+    if (cardMbit && cardEsp) {
+      if (isEsp) {
+        cardEsp.className = 'device-opt-card p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
+        cardMbit.className = 'device-opt-card p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100';
+      } else {
+        cardMbit.className = 'device-opt-card p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
+        cardEsp.className = 'device-opt-card p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100';
+      }
+    }
+
+    if (secMbit && secEsp) {
+      secMbit.classList.toggle('hidden', isEsp);
+      secEsp.classList.toggle('hidden', !isEsp);
+    }
+
+    updateDeviceUI({ status: window.deviceManager.getStatus().state });
+    showToast(isEsp ? "Perangkat target diubah ke ESP32 (Wi-Fi)" : "Perangkat target diubah ke BBC micro:bit (Bluetooth)");
+  };
+
+  /* Modal Open Handler */
   window.openDeviceManagerModal = () => {
+    const cfg = window.deviceManager ? window.deviceManager.config : { deviceType: 'MICROBIT' };
+    const devType = cfg.deviceType || 'MICROBIT';
+    const isEsp = devType === 'ESP32';
+
+    // Sinkronkan card & form selection
+    const cardMbit = $('opt-card-microbit');
+    const cardEsp = $('opt-card-esp32');
+    const secMbit = $('sec-config-microbit');
+    const secEsp = $('sec-config-esp32');
+
+    if (cardMbit && cardEsp) {
+      if (isEsp) {
+        cardEsp.className = 'device-opt-card p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
+        cardMbit.className = 'device-opt-card p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100';
+      } else {
+        cardMbit.className = 'device-opt-card p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
+        cardEsp.className = 'device-opt-card p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100';
+      }
+    }
+
+    if (secMbit && secEsp) {
+      secMbit.classList.toggle('hidden', isEsp);
+      secEsp.classList.toggle('hidden', !isEsp);
+    }
+
     const isSim = window.deviceManager && typeof window.deviceManager.isSimulated === 'function' ? window.deviceManager.isSimulated() : false;
     const simToggle = $('mbit-sim-toggle');
     if (simToggle) simToggle.checked = isSim;
+
     updateDeviceUI({ status: window.deviceManager ? window.deviceManager.getStatus().state : 'OFFLINE' });
     window.openModal('microbit-modal');
   };
@@ -2203,12 +2429,14 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   };
 
   // Backward-compatible aliases
-  window.connectDevice = window.connectBluetooth;
-  window.disconnectCurrentDevice = window.disconnectBluetooth;
-  window.saveAndConnectDevice = window.connectBluetooth;
-  window.pingCurrentDevice = window.connectBluetooth;
+  window.connectBluetooth = window.connectCurrentDevice;
+  window.disconnectBluetooth = window.disconnectCurrentDevice;
+  window.connectDevice = window.connectCurrentDevice;
+  window.disconnectDevice = window.disconnectCurrentDevice;
+  window.saveAndConnectDevice = window.connectCurrentDevice;
+  window.pingCurrentDevice = window.sendTestPulseCurrentDevice;
   window.toggleEsp32Sim = window.toggleDeviceSim;
-  window.pingEsp32 = window.connectBluetooth;
+  window.pingEsp32 = window.sendTestPulseCurrentDevice;
 
   window.changeSortingMode = async (newMode) => {
     showToast(`Mode diubah ke: ${newMode}`);
@@ -5123,9 +5351,12 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     try { pickRaiVoice(); if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = pickRaiVoice; } catch (e) {}
     try { if (window.yoloStudioUI) window.yoloStudioUI.init(); } catch (e) { console.warn('YOLO Studio UI init error:', e); }
 
-    // Phase 2: Inisialisasi Mode Operasional & Sinkronisasi Pemetaan Mekanisme
+    // Inisialisasi Device Manager & Sinkronisasi UI
     try {
       if (window.deviceManager) {
+        if (typeof updateDeviceUI === 'function') {
+          updateDeviceUI({ status: window.deviceManager.getStatus().state });
+        }
         if (typeof window.deviceManager.onStatusChange === 'function') {
           window.deviceManager.onStatusChange((event) => {
             if (event.type === 'transaction_update' && typeof updateTransactionTelemetryUI === 'function') {
@@ -5140,16 +5371,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         if (typeof window.setOperatingMode === 'function') {
           window.setOperatingMode(currentOpMode);
         }
-        const savedMap = (typeof window.deviceManager.getLegacyMechanismMap === 'function')
-          ? window.deviceManager.getLegacyMechanismMap()
-          : { merah: 'servo', kuning: 'servo', biru: 'arm' };
-
-        if ($('map-color-merah')) $('map-color-merah').value = savedMap.merah || 'servo';
-        if ($('map-color-kuning')) $('map-color-kuning').value = savedMap.kuning || 'servo';
-        if ($('map-color-biru')) $('map-color-biru').value = savedMap.biru || 'arm';
       }
     } catch (e) {
-      console.warn('Phase 2 init error:', e);
+      console.warn('Device manager init error:', e);
     }
 
     setTimeout(() => showToast(state.lang === 'id' ? 'Sistem siap · R-LAB' : 'System ready · R-LAB'), 700);

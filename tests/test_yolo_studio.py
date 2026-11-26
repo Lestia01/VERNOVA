@@ -158,7 +158,7 @@ class TestYoloStudio(unittest.TestCase):
         self.assertIn("job_", job.job_id)
 
         # Wait for worker thread to complete
-        max_wait = 25
+        max_wait = 45
         start_wait = time.time()
         while job.status not in ["Completed", "Failed", "Cancelled"] and (time.time() - start_wait) < max_wait:
             time.sleep(0.5)

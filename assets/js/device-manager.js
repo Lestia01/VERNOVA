@@ -1,14 +1,18 @@
 /**
  * ==============================================================================
- * VERNOVA / R-LAB — Micro:bit Robot Device Manager
- * Arsitektur Sederhana, Stabil & Modular untuk Komunikasi BBC micro:bit
+ * VERNOVA / R-LAB — Multi-Device Connection Manager
+ * Arsitektur Sederhana, Stabil & Modular untuk Komunikasi Robotik:
+ * 1. BBC micro:bit — Bluetooth Low Energy (MakeCode Nordic UART)
+ * 2. ESP32 DevKit V1 — Wi-Fi Local Network (HTTP REST API + JSON)
  * 
  * Mendukung:
- * 1. Web Bluetooth API (Nordic UART Service: 6e400001-b5a3-f393-e0a9-e50e24dcca9e)
- * 2. Transmisi Perintah Sortir Warna (kuning, biru, merah) dan Mode Aktuator (servo, arm)
- * 3. Penerimaan Notifikasi Telemetri / Status dari micro:bit
- * 4. Mode Simulasi Virtual (Offline / Fallback tanpa hardware fisik)
- * 5. Debounce & Perlindungan Pengiriman Duplikat
+ * - Web Bluetooth API (Nordic UART Service: 6e400001-b5a3-f393-e0a9-e50e24dcca9e)
+ * - ESP32 Wi-Fi HTTP REST Client (Full CORS, Endpoint /api/health, /api/sort, /api/mode, /api/stop)
+ * - Transmisi Perintah Sortir Warna (kuning, biru, merah) dan Mode Aktuator (servo, arm)
+ * - Pemilihan Perangkat Dinamis (micro:bit BLE vs ESP32 Wi-Fi) dengan Workflow Identik
+ * - Mode Simulasi Virtual (Offline / Fallback tanpa hardware fisik)
+ * - Debounce & Perlindungan Pengiriman Duplikat
+ * - Tanpa Ketergantungan Pin GPIO Tertentu pada Lapisan Website
  * ==============================================================================
  */
 
@@ -25,6 +29,7 @@
     root.OPERATING_MODES = mod.OPERATING_MODES;
     root.NORDIC_UART_SERVICE_UUID = mod.NORDIC_UART_SERVICE_UUID;
     root.MicrobitBLEAdapter = mod.MicrobitBLEAdapter;
+    root.ESP32WiFiAdapter = mod.ESP32WiFiAdapter;
     root.DeviceConnectionManager = mod.DeviceConnectionManager;
     root.aggregateSortingDistribution = mod.aggregateSortingDistribution;
   }
@@ -32,14 +37,16 @@
   'use strict';
 
   // =========================================================================
-  // 1. KONSTANTA & PROTOKOL NORDIC UART BBC MICRO:BIT
+  // 1. KONSTANTA & PROTOKOL SISTEM
   // =========================================================================
   const DEVICE_TYPES = {
-    MICROBIT: 'MICROBIT'
+    MICROBIT: 'MICROBIT',
+    ESP32: 'ESP32'
   };
 
   const CONNECTION_TYPES = {
-    BLE: 'BLE'
+    BLE: 'BLE',
+    WIFI: 'WIFI'
   };
 
   const CONNECTION_STATES = {
@@ -109,7 +116,7 @@
   }
 
   // =========================================================================
-  // 3. ADAPTER BLE BBC MICRO:BIT (MakeCode Bluetooth UART)
+  // 3A. ADAPTER BLE BBC MICRO:BIT (MakeCode Bluetooth UART)
   // =========================================================================
   class MicrobitBLEAdapter {
     constructor(config = {}) {
@@ -279,6 +286,11 @@
       return { ok: true };
     }
 
+    async reconnect() {
+      await this.disconnect();
+      return await this.connect();
+    }
+
     async _writeMakeCodeCommand(str) {
       if (this.simulationMode) return true;
       if (!this.rxCharacteristic) throw new Error('Karakteristik micro:bit UART tidak siap.');
@@ -369,65 +381,469 @@
         await this._writeMakeCodeCommand(cmdStr);
         return { ok: true, mode };
       } catch (err) {
+        this.lastError = err.message;
         return { ok: false, mode, error: err.message };
       }
     }
 
     async sendEmergencyStop() {
-      if (this.simulationMode) {
-        this._notify(CONNECTION_STATES.SIMULATED, 'Emergency stop (Simulasi micro:bit)');
-        return { ok: true, simulated: true, status: 'STOPPED' };
-      }
+      if (this.simulationMode) return { ok: true, simulated: true, status: 'STOPPED' };
       try {
         await this._writeMakeCodeCommand('stop');
-        this._notify(CONNECTION_STATES.CONNECTED, 'Emergency stop terkirim ke micro:bit.');
         return { ok: true, status: 'STOPPED' };
       } catch (err) {
-        return { ok: false, error: err.message };
+        this.lastError = err.message;
+        return { ok: false, error: err.message, status: 'STOP_UNCONFIRMED' };
       }
     }
 
     async sendTestPulse() {
       if (this.simulationMode) return { ok: true, simulated: true, status: 'PULSE_ACK' };
       try {
-        await this._writeMakeCodeCommand('ping');
-        return { ok: true, status: 'PULSE_ACK' };
+        await this._writeMakeCodeCommand('test');
+        return { ok: true, message: 'Pulse test OK' };
       } catch (err) {
+        this.lastError = err.message;
         return { ok: false, error: err.message };
       }
     }
   }
 
   // =========================================================================
-  // 4. DEVICE CONNECTION MANAGER (Pengelola Komunikasi micro:bit & Debounce)
+  // 3B. ADAPTER WI-FI ESP32 (HTTP REST API + JSON)
+  // =========================================================================
+  class ESP32WiFiAdapter {
+    constructor(config = {}) {
+      this.deviceType = DEVICE_TYPES.ESP32;
+      this.connectionType = CONNECTION_TYPES.WIFI;
+      this.host = this._sanitizeHost(config.host || 'http://192.168.4.1');
+      this.simulationMode = Boolean(config.simulationMode);
+      this.status = this.simulationMode ? CONNECTION_STATES.SIMULATED : CONNECTION_STATES.DISCONNECTED;
+      this.timeoutMs = config.timeoutMs || 4000;
+      this.lastError = null;
+      this.lastAck = null;
+      this.lastTelemetry = null;
+      this._listeners = new Set();
+
+      if (this.simulationMode) {
+        this._initSimulatedTelemetry();
+      }
+    }
+
+    _sanitizeHost(rawHost) {
+      let h = String(rawHost || '').trim();
+      if (!h) return 'http://192.168.4.1';
+      if (!/^https?:\/\//i.test(h)) h = 'http://' + h;
+      return h.replace(/\/+$/, '');
+    }
+
+    setHost(newHost) {
+      this.host = this._sanitizeHost(newHost);
+      return this.host;
+    }
+
+    _initSimulatedTelemetry() {
+      this.lastTelemetry = {
+        deviceId: 'VERNOVA-ESP32-SIM',
+        firmwareVersion: 'ESP32-WiFi-v2.1',
+        state: 'READY',
+        protocol: 'HTTP-JSON',
+        host: this.host,
+        wifiRssi: -50,
+        freeHeap: 245760,
+        uptimeSec: 120,
+        lastSeen: new Date().toISOString()
+      };
+    }
+
+    addListener(fn) {
+      if (typeof fn === 'function') this._listeners.add(fn);
+      return () => this._listeners.delete(fn);
+    }
+
+    onStatusChange(fn) {
+      return this.addListener(fn);
+    }
+
+    _notify(status, message = '', extra = {}) {
+      this.status = status;
+      const ev = {
+        deviceType: this.deviceType,
+        connectionType: this.connectionType,
+        status,
+        message,
+        host: this.host,
+        timestamp: new Date().toISOString(),
+        ...extra
+      };
+      this._listeners.forEach(fn => {
+        try { fn(ev); } catch (e) { console.warn('Listener error:', e); }
+      });
+    }
+
+    getStatus() {
+      return {
+        deviceType: this.deviceType,
+        connectionType: this.connectionType,
+        state: this.status,
+        host: this.host,
+        simulationMode: this.simulationMode,
+        lastError: this.lastError,
+        telemetry: this.lastTelemetry
+      };
+    }
+
+    setSimulation(isSim) {
+      this.simulationMode = Boolean(isSim);
+      if (this.simulationMode) {
+        this._initSimulatedTelemetry();
+        this._notify(CONNECTION_STATES.SIMULATED, 'Mode simulasi ESP32 Wi-Fi aktif.');
+      } else {
+        this.status = CONNECTION_STATES.DISCONNECTED;
+        this._notify(CONNECTION_STATES.DISCONNECTED, 'Mode perangkat fisik aktif.');
+      }
+      return this.simulationMode;
+    }
+
+    async _fetchWithTimeout(url, options = {}) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), options.timeoutMs || this.timeoutMs);
+      try {
+        const resp = await fetch(url, {
+          ...options,
+          signal: ctrl.signal,
+          headers: {
+            'Accept': 'application/json',
+            ...(options.headers || {})
+          }
+        });
+        clearTimeout(timer);
+        return resp;
+      } catch (err) {
+        clearTimeout(timer);
+        if (err.name === 'AbortError') {
+          throw new Error(`Timeout menghubungi ESP32 (${options.timeoutMs || this.timeoutMs}ms) di ${this.host}`);
+        }
+        throw err;
+      }
+    }
+
+    async connect() {
+      if (this.simulationMode) {
+        this._initSimulatedTelemetry();
+        this._notify(CONNECTION_STATES.SIMULATED, 'Tersambung ke ESP32 Wi-Fi (Simulasi Virtual).');
+        return { ok: true, simulated: true, telemetry: this.lastTelemetry };
+      }
+
+      this._notify(CONNECTION_STATES.CONNECTING, `Menghubungi ESP32 di ${this.host}...`);
+      try {
+        let resp = null;
+        try {
+          resp = await this._fetchWithTimeout(`${this.host}/api/health`, { method: 'GET' });
+        } catch (e1) {
+          // Fallback ke /api/status jika firmware menggunakan /api/status
+          resp = await this._fetchWithTimeout(`${this.host}/api/status`, { method: 'GET' });
+        }
+
+        if (!resp || !resp.ok) {
+          throw new Error(`ESP32 merespons dengan HTTP ${resp ? resp.status : 'ERR'}`);
+        }
+
+        let data = {};
+        try {
+          data = await resp.json();
+        } catch (je) {
+          data = { ok: true, state: 'READY' };
+        }
+
+        this.lastTelemetry = {
+          deviceId: data.deviceId || 'ESP32-Device',
+          firmwareVersion: data.firmwareVersion || 'ESP32-WiFi',
+          state: data.state || 'READY',
+          protocol: 'HTTP-JSON',
+          host: this.host,
+          wifiRssi: data.wifiRssi || data.rssi || null,
+          freeHeap: data.freeHeap || null,
+          uptimeSec: data.uptimeSec || data.uptime || null,
+          lastSeen: new Date().toISOString()
+        };
+
+        this.lastError = null;
+        this._notify(CONNECTION_STATES.CONNECTED, `Terhubung ke ESP32 Wi-Fi (${this.host}).`, { telemetry: this.lastTelemetry });
+        return { ok: true, telemetry: this.lastTelemetry };
+      } catch (err) {
+        this.lastError = err.message;
+        this._notify(CONNECTION_STATES.ERROR, `Gagal koneksi ESP32 Wi-Fi: ${err.message}`);
+        return { ok: false, error: err.message };
+      }
+    }
+
+    async disconnect() {
+      this._notify(CONNECTION_STATES.DISCONNECTED, 'Koneksi ESP32 Wi-Fi diputuskan.');
+      return { ok: true };
+    }
+
+    async reconnect() {
+      await this.disconnect();
+      return await this.connect();
+    }
+
+    async sendSortingCommand(params = {}) {
+      const rawColor = String(params.color || params || '').toLowerCase().trim();
+      let color = null;
+      if (rawColor.includes('kuning') || rawColor.includes('yellow')) color = 'kuning';
+      else if (rawColor.includes('biru') || rawColor.includes('blue')) color = 'biru';
+      else if (rawColor.includes('merah') || rawColor.includes('red')) color = 'merah';
+
+      if (!VALID_COLORS.includes(color)) {
+        throw new Error(`Warna tidak valid: "${params.color}". Harus salah satu dari: ${VALID_COLORS.join(', ')}`);
+      }
+
+      const mode = params.mode && VALID_MODES.includes(params.mode) ? params.mode : 'Servo';
+      const commandId = params.commandId || `CMD_ESP_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const startTime = Date.now();
+
+      // Kasus A: Simulasi Virtual
+      if (this.simulationMode) {
+        this._notify(CONNECTION_STATES.BUSY, `[ESP32 Simulasi] Sortir ${color} (${mode})`);
+        await new Promise(r => setTimeout(r, 200));
+        const durationMs = Date.now() - startTime;
+        const result = {
+          ok: true,
+          simulated: true,
+          commandId,
+          color,
+          mode,
+          status: 'COMPLETED',
+          executionStatus: 'simulated_esp32_wifi',
+          durationMs,
+          message: `Simulasi ESP32 ${color} sukses.`
+        };
+        this.lastAck = result;
+        this._notify(CONNECTION_STATES.SIMULATED, `[ESP32 Simulasi] Selesai ${color} (${mode})`);
+        return result;
+      }
+
+      // Kasus B: Hardware Nyata via HTTP POST
+      this._notify(CONNECTION_STATES.BUSY, `Mengirim ke ESP32: "${color}" (${mode})...`);
+      try {
+        const payload = {
+          type: 'sort',
+          color,
+          mode: mode.toLowerCase(),
+          objectType: params.objectType || 'CYLINDER_CAP',
+          commandId
+        };
+
+        const resp = await this._fetchWithTimeout(`${this.host}/api/sort`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!resp.ok) {
+          throw new Error(`ESP32 menolak sortir (HTTP ${resp.status})`);
+        }
+
+        let resJson = {};
+        try {
+          resJson = await resp.json();
+        } catch (e) {
+          resJson = { ok: true };
+        }
+
+        const durationMs = Date.now() - startTime;
+        const result = {
+          ok: resJson.ok !== false,
+          commandId,
+          color,
+          mode,
+          status: resJson.status || 'COMPLETED',
+          executionStatus: 'confirmed_esp32_wifi',
+          durationMs,
+          ...resJson
+        };
+
+        this.lastAck = result;
+        this._notify(CONNECTION_STATES.CONNECTED, `ESP32 sortir ${color} selesai (${durationMs}ms)`);
+        return result;
+      } catch (err) {
+        const durationMs = Date.now() - startTime;
+        this.lastError = err.message;
+        this._notify(CONNECTION_STATES.ERROR, `Gagal kirim ke ESP32: ${err.message}`);
+        return {
+          ok: false,
+          commandId,
+          color,
+          mode,
+          status: 'FAILED',
+          errorCode: 'ERR_ESP32_WIFI_FAILED',
+          durationMs,
+          error: err.message
+        };
+      }
+    }
+
+    async sendModeCommand(modeName) {
+      const mode = VALID_MODES.includes(modeName) ? modeName : 'Servo';
+      if (this.simulationMode) return { ok: true, simulated: true, mode };
+      try {
+        const resp = await this._fetchWithTimeout(`${this.host}/api/mode`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'mode', mode: mode.toLowerCase() })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        return { ok: true, mode };
+      } catch (err) {
+        this.lastError = err.message;
+        return { ok: false, mode, error: err.message };
+      }
+    }
+
+    async sendEmergencyStop() {
+      if (this.simulationMode) return { ok: true, simulated: true, status: 'STOPPED' };
+      try {
+        const resp = await this._fetchWithTimeout(`${this.host}/api/stop`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'stop' })
+        });
+        return { ok: resp.ok, status: 'STOPPED' };
+      } catch (err) {
+        this.lastError = err.message;
+        return { ok: false, error: err.message, status: 'STOP_UNCONFIRMED' };
+      }
+    }
+
+    async sendTestPulse() {
+      if (this.simulationMode) return { ok: true, simulated: true, status: 'PULSE_ACK' };
+      try {
+        const resp = await this._fetchWithTimeout(`${this.host}/api/test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'test' })
+        });
+        return { ok: resp.ok, message: 'Test pulse acknowledged' };
+      } catch (err) {
+        this.lastError = err.message;
+        return { ok: false, error: err.message };
+      }
+    }
+  }
+
+  // =========================================================================
+  // 4. DEVICE CONNECTION MANAGER (Pengelola Komunikasi Terpadu & Debounce)
   // =========================================================================
   class DeviceConnectionManager {
     constructor(config = {}) {
+      const savedDeviceType = (typeof localStorage !== 'undefined' && localStorage.getItem('rlab_device_type')) || DEVICE_TYPES.MICROBIT;
+      const savedHost = (typeof localStorage !== 'undefined' && localStorage.getItem('rlab_esp32_host')) || 'http://192.168.4.1';
+
       this.config = {
-        deviceType: DEVICE_TYPES.MICROBIT,
-        connectionType: CONNECTION_TYPES.BLE,
+        deviceType: config.deviceType || savedDeviceType,
+        connectionType: (config.deviceType || savedDeviceType) === DEVICE_TYPES.ESP32 ? CONNECTION_TYPES.WIFI : CONNECTION_TYPES.BLE,
         debounceMs: config.debounceMs || 1200,
         simulationMode: Boolean(config.simulationMode),
         operatingMode: config.operatingMode || OPERATING_MODES.AUTO,
+        host: config.host || savedHost,
+        deviceName: config.deviceName || 'BBC micro:bit',
         ...config
       };
 
       this.operatingMode = this.config.operatingMode;
-      this.adapter = new MicrobitBLEAdapter({
-        simulationMode: this.config.simulationMode,
-        deviceName: config.deviceName
-      });
-
+      this.listeners = new Set();
       this.lastDispatchedColor = null;
       this.lastDispatchedTime = 0;
-      this.listeners = new Set();
 
-      // Teruskan notifikasi dari adapter ke manager listeners
-      this.adapter.onStatusChange(ev => {
-        this.listeners.forEach(fn => {
-          try { fn(ev); } catch (e) { console.warn('Manager listener error:', e); }
-        });
+      // Inisialisasi adapter
+      this._initAdapters();
+    }
+
+    _initAdapters() {
+      this.microbitAdapter = new MicrobitBLEAdapter({
+        simulationMode: this.config.simulationMode,
+        deviceName: this.config.deviceName
       });
+
+      this.esp32Adapter = new ESP32WiFiAdapter({
+        simulationMode: this.config.simulationMode,
+        host: this.config.host
+      });
+
+      this._setupAdapterListeners(this.microbitAdapter);
+      this._setupAdapterListeners(this.esp32Adapter);
+
+      this.adapter = this.config.deviceType === DEVICE_TYPES.ESP32 ? this.esp32Adapter : this.microbitAdapter;
+    }
+
+    _setupAdapterListeners(adapter) {
+      adapter.onStatusChange(ev => {
+        // Teruskan event hanya jika berasal dari adapter aktif
+        if (adapter === this.adapter) {
+          this.listeners.forEach(fn => {
+            try { fn(ev); } catch (e) { console.warn('Manager listener error:', e); }
+          });
+        }
+      });
+    }
+
+    switchDevice(deviceType, options = {}) {
+      const targetType = String(deviceType || '').toUpperCase().trim();
+      if (targetType !== DEVICE_TYPES.MICROBIT && targetType !== DEVICE_TYPES.ESP32) {
+        throw new Error(`Device type tidak valid: "${deviceType}". Harus MICROBIT atau ESP32.`);
+      }
+
+      // Putuskan koneksi adapter lama bila aktif
+      if (this.adapter && typeof this.adapter.disconnect === 'function') {
+        this.adapter.disconnect().catch(() => {});
+      }
+
+      this.config.deviceType = targetType;
+      this.config.connectionType = targetType === DEVICE_TYPES.ESP32 ? CONNECTION_TYPES.WIFI : CONNECTION_TYPES.BLE;
+
+      if (options.host) {
+        this.config.host = options.host;
+        this.esp32Adapter.setHost(options.host);
+      }
+      if (options.simulationMode !== undefined) {
+        this.setSimulation(options.simulationMode);
+      }
+
+      this.adapter = targetType === DEVICE_TYPES.ESP32 ? this.esp32Adapter : this.microbitAdapter;
+
+      // Simpan preferensi ke localStorage
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('rlab_device_type', targetType);
+        if (this.config.host) localStorage.setItem('rlab_esp32_host', this.config.host);
+      }
+
+      // Beri tahu listener
+      const currentStatus = this.adapter.getStatus();
+      const ev = {
+        type: 'device_switched',
+        deviceType: targetType,
+        connectionType: this.config.connectionType,
+        status: currentStatus.state,
+        host: this.config.host,
+        timestamp: new Date().toISOString()
+      };
+      this.listeners.forEach(fn => {
+        try { fn(ev); } catch (e) {}
+      });
+
+      return { ok: true, deviceType: targetType, connectionType: this.config.connectionType };
+    }
+
+    setHost(host) {
+      this.config.host = host;
+      if (this.esp32Adapter) this.esp32Adapter.setHost(host);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('rlab_esp32_host', host);
+      }
+      return this.config.host;
     }
 
     addListener(fn) {
@@ -444,7 +860,13 @@
     }
 
     getStatus() {
-      return this.adapter.getStatus();
+      const s = this.adapter.getStatus();
+      return {
+        ...s,
+        deviceType: this.config.deviceType,
+        connectionType: this.config.connectionType,
+        operatingMode: this.operatingMode
+      };
     }
 
     isSimulated() {
@@ -452,9 +874,11 @@
     }
 
     setSimulation(isSim) {
-      const res = this.adapter.setSimulation(isSim);
-      this.config.simulationMode = res;
-      return res;
+      const simVal = Boolean(isSim);
+      this.config.simulationMode = simVal;
+      this.microbitAdapter.setSimulation(simVal);
+      this.esp32Adapter.setSimulation(simVal);
+      return simVal;
     }
 
     getOperatingMode() {
@@ -479,6 +903,14 @@
 
     async disconnect() {
       return await this.adapter.disconnect();
+    }
+
+    async reconnect() {
+      if (typeof this.adapter.reconnect === 'function') {
+        return await this.adapter.reconnect();
+      }
+      await this.disconnect();
+      return await this.connect();
     }
 
     async sendTestPulse() {
@@ -520,6 +952,7 @@
       return await this.adapter.sendSortingCommand({
         color,
         mode,
+        objectType: params.objectType || 'CYLINDER_CAP',
         commandId: params.commandId
       });
     }
@@ -550,6 +983,7 @@
     NORDIC_UART_TX_CHARACTERISTIC_UUID,
     NORDIC_UART_RX_CHARACTERISTIC_UUID,
     MicrobitBLEAdapter,
+    ESP32WiFiAdapter,
     DeviceConnectionManager,
     aggregateSortingDistribution
   };
