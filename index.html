@@ -733,8 +733,10 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <i class="fas fa-database text-xs"></i>
           </button>
 
-          <button onclick="window.openDeviceManagerModal()" class="icon-btn" title="Hardware Controller (micro:bit / ESP32)">
-            <i class="fas fa-microchip text-xs"></i>
+          <!-- Hardware Controller Selector Button (Prominent & Accessible) -->
+          <button id="btn-hardware-ctrl" onclick="window.openDeviceManagerModal()" class="btn-ghost px-2.5 py-1.5 text-xs font-semibold flex items-center gap-1.5 border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 hover:border-indigo-500 bg-indigo-50/80 dark:bg-indigo-950/40 rounded-xl transition-all shadow-sm" title="Hardware Controller: Pilih BBC micro:bit (BLE) atau ESP32 (Wi-Fi)">
+            <i class="fas fa-microchip text-indigo-500 dark:text-indigo-400"></i>
+            <span class="font-bold text-[11px]">Hardware</span>
           </button>
 
           <button id="btn-conn-bt" onclick="window.connectCurrentDevice()" class="btn-primary px-3 py-2 text-[10px] flex items-center gap-2" title="Connect Robot Device">
@@ -822,10 +824,18 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
               <!-- 1. Perangkat Tujuan -->
               <div>
-                <label class="text-[11px] font-bold t-muted block mb-1">Perangkat Target</label>
-                <div id="man-device-display" class="inp text-xs font-bold flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 cursor-default">
-                  <i class="fab fa-bluetooth-b text-indigo-500"></i>
-                  <span>BBC micro:bit (Bluetooth UART)</span>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="text-[11px] font-bold t-muted block">Perangkat Target</label>
+                  <button type="button" onclick="window.openDeviceManagerModal()" class="text-[10px] text-blue-500 hover:text-blue-600 dark:hover:text-blue-400 font-bold flex items-center gap-1 cursor-pointer" title="Ubah perangkat target">
+                    <i class="fas fa-gear text-[9px]"></i><span>Ganti</span>
+                  </button>
+                </div>
+                <div id="man-device-display" onclick="window.openDeviceManagerModal()" class="inp text-xs font-bold flex items-center justify-between bg-slate-100 dark:bg-slate-800/80 cursor-pointer hover:border-blue-500 hover:shadow-sm transition-all" title="Klik untuk mengganti perangkat (micro:bit atau ESP32)">
+                  <div class="flex items-center gap-2" id="man-device-inner">
+                    <i class="fab fa-bluetooth-b text-indigo-500"></i>
+                    <span>BBC micro:bit (Bluetooth UART)</span>
+                  </div>
+                  <span class="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1"><i class="fas fa-chevron-right text-[9px]"></i></span>
                 </div>
               </div>
               <!-- 2. Mekanisme Target -->
@@ -1538,6 +1548,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     <div class="h-px" style="background:var(--border)"></div>
 
     <div class="flex flex-col gap-1.5">
+      <button onclick="window.toggleDrawer(false);window.openDeviceManagerModal()" class="mnav-btn">
+        <i class="fas fa-microchip text-indigo-400"></i><span>Hardware Controller (micro:bit / ESP32)</span>
+      </button>
       <button onclick="window.toggleDrawer(false);window.openModal('settings-modal')" class="mnav-btn">
         <i class="fas fa-sliders"></i><span data-i18n="nav.settings">Settings</span>
       </button>
@@ -1592,6 +1605,18 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
           <i class="fas fa-circle-info mr-1"></i>
           <span data-i18n="set.barHint">HP selalu memakai menu drawer (tombol ☰). Posisi Kiri/Kanan/Atas hanya berlaku di laptop/desktop ≥1024px.</span>
         </p>
+      </div>
+
+      <div class="mb-4 p-3.5 rounded-2xl border" style="background:var(--surface-soft);border-color:var(--border)">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-xs font-bold flex items-center gap-1.5"><i class="fas fa-microchip text-indigo-500"></i> Robot Hardware Controller</p>
+            <p class="text-[10px] t-muted mt-0.5">Pilih target: BBC micro:bit (BLE) atau ESP32 (Wi-Fi)</p>
+          </div>
+          <button type="button" onclick="window.closeModal('settings-modal');window.openDeviceManagerModal()" class="btn-primary px-3 py-1.5 text-[11px] font-bold">
+            Buka Controller
+          </button>
+        </div>
       </div>
 
       <div class="mt-6 pt-5 border-t flex items-center justify-between" style="border-color:var(--border)">
@@ -2232,8 +2257,8 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
     if (manDevice) {
       manDevice.innerHTML = isEsp 
-        ? '<i class="fas fa-wifi text-indigo-500 mr-1.5"></i><span>ESP32 DevKit V1 (Wi-Fi REST)</span>'
-        : '<i class="fab fa-bluetooth-b text-indigo-500 mr-1.5"></i><span>BBC micro:bit (Bluetooth UART)</span>';
+        ? '<div class="flex items-center gap-2"><i class="fas fa-wifi text-indigo-500"></i><span>ESP32 DevKit V1 (Wi-Fi REST)</span></div><span class="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1"><i class="fas fa-chevron-right text-[9px]"></i></span>'
+        : '<div class="flex items-center gap-2"><i class="fab fa-bluetooth-b text-indigo-500"></i><span>BBC micro:bit (Bluetooth UART)</span></div><span class="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1"><i class="fas fa-chevron-right text-[9px]"></i></span>';
     }
 
     // 4. Update Modal Elements
