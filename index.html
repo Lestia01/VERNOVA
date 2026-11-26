@@ -739,11 +739,54 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <span class="font-bold text-[11px]">Hardware</span>
           </button>
 
-          <button id="btn-conn-bt" onclick="window.connectCurrentDevice()" class="btn-primary px-3 py-2 text-[10px] flex items-center gap-2" title="Connect Robot Device">
-            <i id="btn-device-icon" class="fab fa-bluetooth-b"></i><span id="btn-device-label" class="hidden sm:inline">CONNECT</span>
-          </button>
-          <button id="btn-dis-bt" onclick="window.disconnectCurrentDevice()" disabled class="icon-btn danger hidden" title="Disconnect Robot Device">
-            <i class="fas fa-xmark text-xs"></i>
+          <!-- Hubungkan Button with 2 Options (micro:bit Bluetooth & ESP32 Wi-Fi) -->
+          <div class="relative inline-block" id="connect-dropdown-wrapper">
+            <button id="btn-conn-bt" type="button" onclick="window.toggleConnectDropdown(event)" class="btn-primary px-3 py-2 text-[10px] flex items-center gap-1.5 shadow-sm" title="Hubungkan Robot: micro:bit (Bluetooth) atau ESP32 (Wi-Fi)">
+              <i id="btn-device-icon" class="fas fa-plug text-xs"></i>
+              <span id="btn-device-label" class="font-bold" data-i18n="btn.connect">HUBUNGKAN</span>
+              <i class="fas fa-chevron-down text-[8px] opacity-80 ml-0.5"></i>
+            </button>
+
+            <!-- Dropdown Menu -->
+            <div id="connect-dropdown-menu" class="hidden absolute right-0 mt-2 w-72 rounded-2xl border shadow-2xl z-50 p-2 text-left animate-in fade-in zoom-in-95 duration-150" style="background:var(--surface);border-color:var(--border);">
+              <div class="px-2.5 py-1.5 text-[10px] font-bold t-muted uppercase tracking-wider border-b mb-1.5" style="border-color:var(--border)">
+                Pilih Koneksi Perangkat
+              </div>
+
+              <!-- Pilihan 1: BBC micro:bit (Bluetooth) -->
+              <button type="button" onclick="window.selectAndConnectDevice('MICROBIT')" class="w-full text-left p-2.5 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-950/40 border border-transparent hover:border-blue-400/30 flex items-center gap-3 transition-all mb-1 cursor-pointer group">
+                <div class="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 text-base shadow-sm group-hover:scale-105 transition-transform">
+                  <i class="fab fa-bluetooth-b"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center justify-between">
+                    <span>BBC micro:bit</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold">Bluetooth</span>
+                  </div>
+                  <p class="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">Koneksi BLE (MakeCode UART)</p>
+                </div>
+              </button>
+
+              <!-- Pilihan 2: ESP32 (Wi-Fi) -->
+              <button type="button" onclick="window.selectAndConnectDevice('ESP32')" class="w-full text-left p-2.5 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border border-transparent hover:border-emerald-400/30 flex items-center gap-3 transition-all cursor-pointer group">
+                <div class="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 text-base shadow-sm group-hover:scale-105 transition-transform">
+                  <i class="fas fa-wifi"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center justify-between">
+                    <span>ESP32 DevKit</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold">Wi-Fi</span>
+                  </div>
+                  <p class="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">Koneksi HTTP REST via IP lokal</p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Tombol Putuskan Saat Terhubung -->
+          <button id="btn-dis-bt" onclick="window.disconnectCurrentDevice()" disabled class="btn-ghost px-3 py-2 text-[10px] font-bold text-red-500 border border-red-500/30 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center gap-1.5 hidden shadow-sm" title="Putuskan Koneksi Robot">
+            <i class="fas fa-power-off text-xs text-red-500"></i>
+            <span id="btn-dis-label">PUTUSKAN</span>
           </button>
 
         <button onclick="window.logoutAdmin()" class="icon-btn" title="Back to Home">
@@ -2233,20 +2276,21 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     }
 
     // 2. Update Topbar connect/disconnect buttons
+    const dropdownWrap = $('connect-dropdown-wrapper');
     if (btnConn && btnDis) {
       if (st === 'CONNECTED' || st === 'READY' || isSim) {
+        if (dropdownWrap) dropdownWrap.classList.add('hidden');
         btnConn.classList.add('hidden');
         btnDis.classList.remove('hidden');
         btnDis.removeAttribute('disabled');
+        const disLabel = $('btn-dis-label');
+        if (disLabel) disLabel.innerText = `PUTUSKAN (${devName})`;
       } else {
+        if (dropdownWrap) dropdownWrap.classList.remove('hidden');
         btnConn.classList.remove('hidden');
         btnDis.classList.add('hidden');
+        if (btnLabel) btnLabel.innerText = 'HUBUNGKAN';
       }
-    }
-
-    if (btnIcon && btnLabel) {
-      btnIcon.className = isEsp ? 'fas fa-wifi' : 'fab fa-bluetooth-b';
-      btnLabel.innerText = `CONNECT ${devName.toUpperCase()}`;
     }
 
     // 3. Update Live Transaction & Manual Panel Displays
@@ -2452,6 +2496,47 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       : "Mode Simulasi Nonaktif (Menggunakan Hardware Fisik)");
     updateDeviceUI({ status: isSim ? 'SIMULATED' : 'DISCONNECTED' });
   };
+
+  /* Connect Dropdown Menu Handlers */
+  window.toggleConnectDropdown = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const menu = $('connect-dropdown-menu');
+    if (menu) {
+      menu.classList.toggle('hidden');
+    }
+  };
+
+  window.closeConnectDropdown = () => {
+    const menu = $('connect-dropdown-menu');
+    if (menu) {
+      menu.classList.add('hidden');
+    }
+  };
+
+  window.selectAndConnectDevice = async (type) => {
+    window.closeConnectDropdown();
+    if (window.deviceManager && typeof window.deviceManager.switchDevice === 'function') {
+      window.deviceManager.switchDevice(type);
+    }
+    if (type === 'MICROBIT') {
+      await window.connectCurrentDevice();
+    } else if (type === 'ESP32') {
+      window.openDeviceManagerModal();
+      showToast(state.lang === 'id' 
+        ? "Silakan atur atau pastikan Host IP ESP32 lalu klik Hubungkan Perangkat" 
+        : "Please verify ESP32 Host IP then click Connect Device");
+    }
+  };
+
+  document.addEventListener('click', (e) => {
+    const wrap = $('connect-dropdown-wrapper');
+    if (wrap && !wrap.contains(e.target)) {
+      window.closeConnectDropdown();
+    }
+  });
 
   // Backward-compatible aliases
   window.connectBluetooth = window.connectCurrentDevice;
