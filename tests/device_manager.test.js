@@ -266,4 +266,55 @@ test('VERNOVA / Smart Factory Multi-Device Manager (device-manager.js)', async (
     assert.equal(res.color, 'merah');
   });
 
+  await t.test('12. ESP32 Host Selection & Persistence (172.25.15.108 vs 192.168.4.1)', async () => {
+    // 12.1 Host Sanitization & Endpoint Normalization
+    const espAdapter = new ESP32WiFiAdapter({ host: '172.25.15.108', simulationMode: true });
+    assert.equal(espAdapter.host, 'http://172.25.15.108');
+    assert.equal(espAdapter._buildUrl('/api/test'), 'http://172.25.15.108/api/test');
+    assert.equal(espAdapter._buildUrl('api/sort'), 'http://172.25.15.108/api/sort');
+
+    // Stripping accidental /api or trailing slash
+    espAdapter.setHost('http://172.25.15.108/api/');
+    assert.equal(espAdapter.host, 'http://172.25.15.108');
+
+    espAdapter.setHost('172.25.15.108/api/test');
+    assert.equal(espAdapter.host, 'http://172.25.15.108');
+
+    // 12.2 Manager Persistence & Switch Device Without Reverting
+    const manager = new DeviceConnectionManager({
+      deviceType: DEVICE_TYPES.MICROBIT,
+      simulationMode: true,
+      host: 'http://172.25.15.108'
+    });
+
+    assert.equal(manager.config.host, 'http://172.25.15.108');
+
+    // Ganti ke ESP32 tanpa menyertakan options.host -> Host 172.25.15.108 tetap bertahan
+    manager.switchDevice('ESP32');
+    assert.equal(manager.config.host, 'http://172.25.15.108');
+    assert.equal(manager.getActiveAdapter().host, 'http://172.25.15.108');
+
+    // Panggil sendTestPulse -> targetUrl & host mengarah ke 172.25.15.108
+    const pulseRes = await manager.sendTestPulse();
+    assert.equal(pulseRes.ok, true);
+    assert.equal(pulseRes.host, 'http://172.25.15.108');
+    assert.equal(pulseRes.targetUrl, 'http://172.25.15.108/api/test');
+
+    // Set host manual dengan IP baru
+    manager.setHost('172.25.15.200');
+    assert.equal(manager.config.host, 'http://172.25.15.200');
+    assert.equal(manager.getActiveAdapter().host, 'http://172.25.15.200');
+
+    // Ganti ke MICROBIT lalu kembali ke ESP32 -> Host 172.25.15.200 TIDAK hilang / tertimpa 192.168.4.1
+    manager.switchDevice('MICROBIT');
+    manager.switchDevice('ESP32');
+    assert.equal(manager.config.host, 'http://172.25.15.200');
+    assert.equal(manager.getActiveAdapter().host, 'http://172.25.15.200');
+
+    // SoftAP 192.168.4.1 hanya aktif jika pengguna secara eksplisit memilih preset SoftAP
+    manager.setHost('http://192.168.4.1');
+    assert.equal(manager.config.host, 'http://192.168.4.1');
+    assert.equal(manager.getActiveAdapter().host, 'http://192.168.4.1');
+  });
+
 });

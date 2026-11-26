@@ -416,7 +416,7 @@
     constructor(config = {}) {
       this.deviceType = DEVICE_TYPES.ESP32;
       this.connectionType = CONNECTION_TYPES.WIFI;
-      this.host = this._sanitizeHost(config.host || 'http://192.168.4.1');
+      this.host = this._sanitizeHost(config.host);
       this.simulationMode = Boolean(config.simulationMode);
       this.status = this.simulationMode ? CONNECTION_STATES.SIMULATED : CONNECTION_STATES.DISCONNECTED;
       this.timeoutMs = config.timeoutMs || 6000;
@@ -432,9 +432,22 @@
 
     _sanitizeHost(rawHost) {
       let h = String(rawHost || '').trim();
-      if (!h) return 'http://192.168.4.1';
+      if (!h) {
+        if (typeof localStorage !== 'undefined') {
+          const stored = localStorage.getItem('rlab_esp32_host');
+          if (stored) return this._sanitizeHost(stored);
+        }
+        return 'http://172.25.15.108';
+      }
       if (!/^https?:\/\//i.test(h)) h = 'http://' + h;
+      // Hapus jika user menyertakan path /api atau /api/test atau trailing slash
+      h = h.replace(/\/api(?:\/.*)?$/i, '');
       return h.replace(/\/+$/, '');
+    }
+
+    _buildUrl(endpoint) {
+      const cleanEndpoint = '/' + String(endpoint || '').replace(/^\/+/, '');
+      return `${this.host}${cleanEndpoint}`;
     }
 
     setHost(newHost) {
@@ -507,7 +520,8 @@
 
     async _fetchWithTimeout(url, options = {}) {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), options.timeoutMs || this.timeoutMs);
+      const timeoutMs = options.timeoutMs || this.timeoutMs;
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
         const resp = await fetch(url, {
           ...options,
@@ -522,8 +536,24 @@
       } catch (err) {
         clearTimeout(timer);
         if (err.name === 'AbortError') {
-          throw new Error(`Timeout menghubungi ESP32 (${options.timeoutMs || this.timeoutMs}ms) di ${this.host}. Pastikan ESP32 aktif & satu Wi-Fi (atau gunakan SoftAP http://192.168.4.1).`);
+          const timeoutErr = new Error(`Timeout menghubungi ESP32 (${timeoutMs}ms) di ${url}. Pastikan ESP32 aktif & satu Wi-Fi (atau gunakan SoftAP http://192.168.4.1).`);
+          timeoutErr.code = 'ERR_ESP32_TIMEOUT';
+          timeoutErr.url = url;
+          throw timeoutErr;
         }
+        // Bedakan Network/CORS/Client Isolation
+        const isNetworkErr = err.name === 'TypeError' || (err.message && (
+          err.message.includes('Failed to fetch') ||
+          err.message.includes('NetworkError') ||
+          err.message.includes('fetch failed')
+        ));
+        if (isNetworkErr) {
+          const netErr = new Error(`Gagal menghubungi ${url} (Network/CORS/Client Isolation). Pastikan ESP32 aktif, IP benar, dan AP Client Isolation tidak aktif pada router.`);
+          netErr.code = 'ERR_ESP32_NETWORK';
+          netErr.url = url;
+          throw netErr;
+        }
+        err.url = url;
         throw err;
       }
     }
@@ -532,21 +562,23 @@
       if (this.simulationMode) {
         this._initSimulatedTelemetry();
         this._notify(CONNECTION_STATES.SIMULATED, 'Tersambung ke ESP32 Wi-Fi (Simulasi Virtual).');
-        return { ok: true, simulated: true, telemetry: this.lastTelemetry };
+        return { ok: true, simulated: true, telemetry: this.lastTelemetry, host: this.host };
       }
 
+      const healthUrl = this._buildUrl('/api/health');
+      const statusUrl = this._buildUrl('/api/status');
       this._notify(CONNECTION_STATES.CONNECTING, `Menghubungi ESP32 di ${this.host}...`);
       try {
         let resp = null;
         try {
-          resp = await this._fetchWithTimeout(`${this.host}/api/health`, { method: 'GET' });
+          resp = await this._fetchWithTimeout(healthUrl, { method: 'GET' });
         } catch (e1) {
           // Fallback ke /api/status jika firmware menggunakan /api/status
-          resp = await this._fetchWithTimeout(`${this.host}/api/status`, { method: 'GET' });
+          resp = await this._fetchWithTimeout(statusUrl, { method: 'GET' });
         }
 
         if (!resp || !resp.ok) {
-          throw new Error(`ESP32 merespons dengan HTTP ${resp ? resp.status : 'ERR'}`);
+          throw new Error(`ESP32 merespons dengan HTTP ${resp ? resp.status : 'ERR'} di ${this.host}`);
         }
 
         let data = {};
@@ -570,11 +602,11 @@
 
         this.lastError = null;
         this._notify(CONNECTION_STATES.CONNECTED, `Terhubung ke ESP32 Wi-Fi (${this.host}).`, { telemetry: this.lastTelemetry });
-        return { ok: true, telemetry: this.lastTelemetry };
+        return { ok: true, telemetry: this.lastTelemetry, host: this.host };
       } catch (err) {
         this.lastError = err.message;
         this._notify(CONNECTION_STATES.ERROR, `Gagal koneksi ESP32 Wi-Fi: ${err.message}`);
-        return { ok: false, error: err.message };
+        return { ok: false, error: err.message, host: this.host, targetUrl: healthUrl };
       }
     }
 
@@ -625,6 +657,7 @@
       }
 
       // Kasus B: Hardware Nyata via HTTP POST
+      const sortUrl = this._buildUrl('/api/sort');
       this._notify(CONNECTION_STATES.BUSY, `Mengirim ke ESP32: "${color}" (${mode})...`);
       try {
         const payload = {
@@ -635,7 +668,7 @@
           commandId
         };
 
-        const resp = await this._fetchWithTimeout(`${this.host}/api/sort`, {
+        const resp = await this._fetchWithTimeout(sortUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -644,7 +677,7 @@
         });
 
         if (!resp.ok) {
-          throw new Error(`ESP32 menolak sortir (HTTP ${resp.status})`);
+          throw new Error(`ESP32 menolak sortir (HTTP ${resp.status}) di ${sortUrl}`);
         }
 
         let resJson = {};
@@ -663,6 +696,8 @@
           status: resJson.status || 'COMPLETED',
           executionStatus: 'confirmed_esp32_wifi',
           durationMs,
+          host: this.host,
+          targetUrl: sortUrl,
           ...resJson
         };
 
@@ -681,6 +716,8 @@
           status: 'FAILED',
           errorCode: 'ERR_ESP32_WIFI_FAILED',
           durationMs,
+          host: this.host,
+          targetUrl: sortUrl,
           error: err.message
         };
       }
@@ -688,86 +725,103 @@
 
     async sendModeCommand(modeName) {
       const mode = VALID_MODES.includes(modeName) ? modeName : 'Servo';
-      if (this.simulationMode) return { ok: true, simulated: true, mode };
+      if (this.simulationMode) return { ok: true, simulated: true, mode, host: this.host };
+      const modeUrl = this._buildUrl('/api/mode');
       try {
-        const resp = await this._fetchWithTimeout(`${this.host}/api/mode`, {
+        const resp = await this._fetchWithTimeout(modeUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'mode', mode: mode.toLowerCase() })
         });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        return { ok: true, mode };
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} di ${modeUrl}`);
+        return { ok: true, mode, host: this.host, targetUrl: modeUrl };
       } catch (err) {
         this.lastError = err.message;
-        return { ok: false, mode, error: err.message };
+        return { ok: false, mode, error: err.message, host: this.host, targetUrl: modeUrl };
       }
     }
 
     async sendEmergencyStop() {
-      if (this.simulationMode) return { ok: true, simulated: true, status: 'STOPPED' };
+      if (this.simulationMode) return { ok: true, simulated: true, status: 'STOPPED', host: this.host };
+      const stopUrl = this._buildUrl('/api/stop');
       try {
-        const resp = await this._fetchWithTimeout(`${this.host}/api/stop`, {
+        const resp = await this._fetchWithTimeout(stopUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'stop' })
         });
-        return { ok: resp.ok, status: 'STOPPED' };
+        return { ok: resp.ok, status: 'STOPPED', host: this.host, targetUrl: stopUrl };
       } catch (err) {
         this.lastError = err.message;
-        return { ok: false, error: err.message, status: 'STOP_UNCONFIRMED' };
+        return { ok: false, error: err.message, status: 'STOP_UNCONFIRMED', host: this.host, targetUrl: stopUrl };
       }
     }
 
     async sendTestPulse(options = {}) {
-      if (this.simulationMode) return { ok: true, simulated: true, status: 'PULSE_ACK', message: 'Test pulse simulasi OK' };
+      if (this.simulationMode) {
+        return {
+          ok: true,
+          simulated: true,
+          status: 'PULSE_ACK',
+          message: 'Test pulse simulasi OK',
+          host: this.host,
+          targetUrl: this._buildUrl('/api/test')
+        };
+      }
       const timeoutMs = options.timeoutMs || this.timeoutMs;
+      const testUrl = this._buildUrl('/api/test');
+      const statusUrl = this._buildUrl('/api/status');
+      const healthUrl = this._buildUrl('/api/health');
       let lastErr = null;
 
       // 1. Coba POST /api/test
       try {
-        const resp = await this._fetchWithTimeout(`${this.host}/api/test`, {
+        const resp = await this._fetchWithTimeout(testUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'test' }),
           timeoutMs
         });
         if (resp.ok) {
-          return { ok: true, message: 'Test pulse acknowledged' };
+          return { ok: true, message: 'Test pulse acknowledged', host: this.host, targetUrl: testUrl };
         }
+        lastErr = new Error(`HTTP ${resp.status} di ${testUrl}`);
       } catch (err1) {
         lastErr = err1;
       }
 
       // 2. Fallback: Coba GET /api/status jika firmware versi sebelumnya digunakan
       try {
-        const respStatus = await this._fetchWithTimeout(`${this.host}/api/status`, {
+        const respStatus = await this._fetchWithTimeout(statusUrl, {
           method: 'GET',
           timeoutMs: Math.min(timeoutMs, 4000)
         });
         if (respStatus.ok) {
           const stJson = await respStatus.json().catch(() => ({}));
-          return { ok: true, message: 'ESP32 merespons status OK (/api/status)', telemetry: stJson };
+          return { ok: true, message: 'ESP32 merespons status OK (/api/status)', host: this.host, targetUrl: statusUrl, telemetry: stJson };
         }
+        if (!lastErr) lastErr = new Error(`HTTP ${respStatus.status} di ${statusUrl}`);
       } catch (err2) {
-        // Abaikan jika tetap gagal
+        if (!lastErr) lastErr = err2;
       }
 
       // 3. Fallback: Coba GET /api/health
       try {
-        const respHealth = await this._fetchWithTimeout(`${this.host}/api/health`, {
+        const respHealth = await this._fetchWithTimeout(healthUrl, {
           method: 'GET',
           timeoutMs: Math.min(timeoutMs, 4000)
         });
         if (respHealth.ok) {
           const hlJson = await respHealth.json().catch(() => ({}));
-          return { ok: true, message: 'ESP32 merespons health OK (/api/health)', telemetry: hlJson };
+          return { ok: true, message: 'ESP32 merespons health OK (/api/health)', host: this.host, targetUrl: healthUrl, telemetry: hlJson };
         }
+        if (!lastErr) lastErr = new Error(`HTTP ${respHealth.status} di ${healthUrl}`);
       } catch (err3) {
-        // Abaikan
+        if (!lastErr) lastErr = err3;
       }
 
-      this.lastError = lastErr ? lastErr.message : 'ESP32 tidak merespons';
-      return { ok: false, error: this.lastError };
+      this.lastError = lastErr ? lastErr.message : `ESP32 tidak merespons di ${testUrl}`;
+      return { ok: false, error: this.lastError, host: this.host, targetUrl: testUrl };
     }
   }
 
@@ -777,7 +831,7 @@
   class DeviceConnectionManager {
     constructor(config = {}) {
       const savedDeviceType = (typeof localStorage !== 'undefined' && localStorage.getItem('rlab_device_type')) || DEVICE_TYPES.MICROBIT;
-      const savedHost = (typeof localStorage !== 'undefined' && localStorage.getItem('rlab_esp32_host')) || 'http://192.168.4.1';
+      const savedHost = (typeof localStorage !== 'undefined' && localStorage.getItem('rlab_esp32_host')) || 'http://172.25.15.108';
 
       this.config = {
         deviceType: config.deviceType || savedDeviceType,
@@ -842,8 +896,10 @@
       this.config.connectionType = targetType === DEVICE_TYPES.ESP32 ? CONNECTION_TYPES.WIFI : CONNECTION_TYPES.BLE;
 
       if (options.host) {
-        this.config.host = options.host;
-        this.esp32Adapter.setHost(options.host);
+        const sanitized = this.esp32Adapter.setHost(options.host);
+        this.config.host = sanitized;
+      } else if (this.config.host) {
+        this.esp32Adapter.setHost(this.config.host);
       }
       if (options.simulationMode !== undefined) {
         this.setSimulation(options.simulationMode);
@@ -875,10 +931,11 @@
     }
 
     setHost(host) {
-      this.config.host = host;
-      if (this.esp32Adapter) this.esp32Adapter.setHost(host);
+      if (!host) return this.config.host;
+      const sanitized = this.esp32Adapter ? this.esp32Adapter.setHost(host) : host;
+      this.config.host = sanitized;
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('rlab_esp32_host', host);
+        localStorage.setItem('rlab_esp32_host', sanitized);
       }
       return this.config.host;
     }

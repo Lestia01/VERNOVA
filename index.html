@@ -1758,7 +1758,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
           <div>
             <label class="text-[11px] font-bold t-muted block mb-1">Alamat IP / Host ESP32:</label>
             <div class="flex items-center gap-2">
-              <input type="text" id="esp32-host-input" value="http://192.168.4.1" placeholder="http://192.168.4.1" class="inp text-xs font-mono font-bold flex-1">
+              <input type="text" id="esp32-host-input" value="http://172.25.15.108" placeholder="http://172.25.15.108" oninput="if(window.deviceManager)window.deviceManager.setHost(this.value.trim())" onchange="if(window.deviceManager)window.deviceManager.setHost(this.value.trim())" class="inp text-xs font-mono font-bold flex-1">
               <button type="button" onclick="window.sendTestPulseCurrentDevice()" class="btn-ghost px-2.5 py-2 text-xs border font-bold flex items-center gap-1 hover:border-blue-500" title="Kirim Test Pulse Ping">
                 <i class="fas fa-wave-square text-xs text-indigo-500"></i><span>Ping / Test</span>
               </button>
@@ -1767,11 +1767,11 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <!-- Quick Presets -->
             <div class="flex items-center gap-1.5 mt-2 flex-wrap">
               <span class="text-[10px] t-muted">Pilihan Cepat:</span>
-              <button type="button" onclick="$('esp32-host-input').value='http://192.168.4.1';if(window.deviceManager)window.deviceManager.setHost('http://192.168.4.1');" class="text-[10px] px-2 py-0.5 rounded border border-indigo-400/40 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-bold hover:border-indigo-500 cursor-pointer">
-                Hotspot ESP32 (192.168.4.1)
-              </button>
-              <button type="button" onclick="$('esp32-host-input').value='http://172.25.15.108';if(window.deviceManager)window.deviceManager.setHost('http://172.25.15.108');" class="text-[10px] px-2 py-0.5 rounded border border-emerald-400/40 bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 font-bold hover:border-emerald-500 cursor-pointer">
+              <button type="button" onclick="window.applyHostPreset('http://172.25.15.108')" class="text-[10px] px-2 py-0.5 rounded border border-emerald-400/40 bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 font-bold hover:border-emerald-500 cursor-pointer">
                 IP Lab (172.25.15.108)
+              </button>
+              <button type="button" onclick="window.applyHostPreset('http://192.168.4.1')" class="text-[10px] px-2 py-0.5 rounded border border-indigo-400/40 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-bold hover:border-indigo-500 cursor-pointer">
+                SoftAP Mandiri (192.168.4.1)
               </button>
             </div>
 
@@ -2377,23 +2377,36 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     }
   }
 
+  /* Helper Host Preset */
+  window.applyHostPreset = (presetUrl) => {
+    const hostInput = $('esp32-host-input');
+    if (hostInput) {
+      hostInput.value = presetUrl;
+    }
+    if (window.deviceManager && typeof window.deviceManager.setHost === 'function') {
+      window.deviceManager.setHost(presetUrl);
+    }
+    showToast(state.lang === 'id' ? `Host ESP32 diatur ke: ${presetUrl}` : `ESP32 host set to: ${presetUrl}`);
+  };
+
   /* Universal Connect Handler */
   window.connectCurrentDevice = async () => {
     const dev = window.deviceManager?.config?.deviceType || 'MICROBIT';
     const isEsp = dev === 'ESP32';
-    showToast(state.lang === 'id' ? `Menghubungkan ke ${isEsp ? 'ESP32 Wi-Fi' : 'micro:bit Bluetooth'}...` : `Connecting to ${isEsp ? 'ESP32 Wi-Fi' : 'micro:bit Bluetooth'}...`);
-    try {
-      if (isEsp) {
-        const hostInput = $('esp32-host-input');
-        if (hostInput && hostInput.value.trim()) {
-          window.deviceManager.setHost(hostInput.value.trim());
-        }
+    if (isEsp) {
+      const hostInput = $('esp32-host-input');
+      if (hostInput && hostInput.value.trim()) {
+        window.deviceManager.setHost(hostInput.value.trim());
       }
+    }
+    const currentHost = window.deviceManager?.config?.host || 'http://172.25.15.108';
+    showToast(state.lang === 'id' ? `Menghubungkan ke ${isEsp ? `ESP32 Wi-Fi (${currentHost})` : 'micro:bit Bluetooth'}...` : `Connecting to ${isEsp ? `ESP32 Wi-Fi (${currentHost})` : 'micro:bit Bluetooth'}...`);
+    try {
       const res = await window.deviceManager.connect();
       if (res && res.ok) {
         showToast(state.lang === 'id'
-          ? `Sukses Terhubung ke ${isEsp ? 'ESP32 Wi-Fi' : 'micro:bit'}! (${res.simulated ? 'Mode Simulasi' : (res.telemetry?.deviceId || 'Online')})`
-          : `Connected to ${isEsp ? 'ESP32 Wi-Fi' : 'micro:bit'}!`);
+          ? `Sukses Terhubung ke ${isEsp ? `ESP32 Wi-Fi (${window.deviceManager.config.host})` : 'micro:bit'}! (${res.simulated ? 'Mode Simulasi' : (res.telemetry?.deviceId || 'Online')})`
+          : `Connected to ${isEsp ? `ESP32 Wi-Fi (${window.deviceManager.config.host})` : 'micro:bit'}!`);
         logActivity("fas fa-plug-circle-check", "background:rgba(34,197,94,.15);color:#22c55e", `${dev} Connected`, res.simulated ? "Mode Simulasi" : (res.telemetry?.deviceId || (isEsp ? window.deviceManager.config.host : "BLE UART")));
         window.closeModal('microbit-modal');
       } else {
@@ -2406,11 +2419,12 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
   /* Reconnect ESP32 */
   window.reconnectCurrentDevice = async () => {
-    showToast(state.lang === 'id' ? "Mencoba menghubungkan ulang ke ESP32..." : "Reconnecting to ESP32...");
+    const targetHost = window.deviceManager?.config?.host || 'http://172.25.15.108';
+    showToast(state.lang === 'id' ? `Mencoba menghubungkan ulang ke ESP32 (${targetHost})...` : `Reconnecting to ESP32 (${targetHost})...`);
     try {
       const res = await window.deviceManager.reconnect();
       if (res && res.ok) {
-        showToast(state.lang === 'id' ? "ESP32 berhasil terhubung kembali!" : "ESP32 reconnected successfully!");
+        showToast(state.lang === 'id' ? `ESP32 berhasil terhubung kembali (${window.deviceManager.config.host})!` : "ESP32 reconnected successfully!");
         logActivity("fas fa-arrows-rotate", "background:rgba(34,197,94,.15);color:#22c55e", "ESP32 Reconnected", window.deviceManager.config.host);
       } else {
         showToast("Reconnect gagal: " + (res?.error || 'Perangkat tidak merespons'));
@@ -2437,17 +2451,18 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         window.deviceManager.setHost(hostInput.value.trim());
       }
     }
-    showToast(state.lang === 'id' ? "Mengirim sinyal uji test pulse..." : "Sending test pulse...");
+    const currentHost = window.deviceManager?.config?.host || 'http://172.25.15.108';
+    showToast(state.lang === 'id' ? `Mengirim sinyal uji test pulse ke ${isEsp ? currentHost : 'micro:bit'}...` : `Sending test pulse...`);
     try {
       const res = await window.deviceManager.sendTestPulse();
       if (res && res.ok) {
-        showToast(state.lang === 'id' ? `Perangkat merespons! (${res.message || 'OK'})` : `Acknowledged: ${res.message || 'OK'}`);
-        logActivity("fas fa-wave-square", "background:rgba(99,102,241,.15);color:#6366f1", "Test Pulse OK", window.deviceManager.config.deviceType);
+        showToast(state.lang === 'id' ? `Perangkat merespons di ${res.host || currentHost}! (${res.message || 'OK'})` : `Acknowledged: ${res.message || 'OK'}`);
+        logActivity("fas fa-wave-square", "background:rgba(99,102,241,.15);color:#6366f1", "Test Pulse OK", `${window.deviceManager.config.deviceType} (${res.targetUrl || currentHost})`);
       } else {
-        showToast("Test pulse gagal: " + (res?.error || 'No response'));
+        showToast(`Test pulse gagal (${res?.targetUrl || currentHost}): ${res?.error || 'No response'}`);
       }
     } catch (e) {
-      showToast("Error test pulse: " + e.message);
+      showToast(`Error test pulse (${currentHost}): ${e.message}`);
     }
   };
 
@@ -2456,7 +2471,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     if (!window.deviceManager || typeof window.deviceManager.switchDevice !== 'function') return;
     const isEsp = devType === 'ESP32';
     const hostInput = $('esp32-host-input');
-    const host = hostInput ? hostInput.value.trim() : null;
+    const host = (hostInput && hostInput.value.trim()) || window.deviceManager.config.host || 'http://172.25.15.108';
 
     window.deviceManager.switchDevice(devType, { host });
 
@@ -2482,7 +2497,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     }
 
     updateDeviceUI({ status: window.deviceManager.getStatus().state });
-    showToast(isEsp ? "Perangkat target diubah ke ESP32 (Wi-Fi)" : "Perangkat target diubah ke BBC micro:bit (Bluetooth)");
+    showToast(isEsp ? `Perangkat target diubah ke ESP32 (Wi-Fi: ${host})` : "Perangkat target diubah ke BBC micro:bit (Bluetooth)");
   };
 
   /* Modal Open Handler */
@@ -2554,7 +2569,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   window.selectAndConnectDevice = async (type) => {
     window.closeConnectDropdown();
     if (window.deviceManager && typeof window.deviceManager.switchDevice === 'function') {
-      window.deviceManager.switchDevice(type);
+      const hostInput = $('esp32-host-input');
+      const activeHost = (hostInput && hostInput.value.trim()) || window.deviceManager.config.host || 'http://172.25.15.108';
+      window.deviceManager.switchDevice(type, { host: activeHost });
     }
     // Langsung eksekusi koneksi perangkat terpilih (baik micro:bit maupun ESP32)
     await window.connectCurrentDevice();
