@@ -31,9 +31,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
-<script src="assets/js/esp32-client.js?v=2.6.0"></script>
 <script src="assets/js/device-manager.js?v=2.6.0"></script>
-<script src="assets/js/smart-data-assistant.js?v=2.6.0"></script>
 <script src="assets/js/yolo-client.js?v=2.6.0"></script>
 <script src="assets/js/yolo-studio-ui.js?v=2.6.0"></script>
 
@@ -719,7 +717,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         <img src="logo.png" alt="Logo R-LAB" class="w-9 h-9 rounded-lg shrink-0 lg:hidden" style="object-fit:cover;border:1px solid var(--border)">
 
         <div class="status-group" role="status" aria-label="Status koneksi">
-          <div id="status-esp32" class="pill" onclick="window.openDeviceManagerModal()" title="Device Connection Status (Klik untuk Konfigurasi)" style="cursor:pointer">DEVICE: OFFLINE</div>
+          <div id="status-bt" class="pill" onclick="window.toggleDeviceSim()" title="micro:bit Connection Status (Klik untuk Toggle Simulasi/Fisik)" style="cursor:pointer">BT: OFFLINE</div>
           <div id="status-fb" class="pill">FB: OFFLINE</div>
           <div id="status-tm" class="pill">AI: STANDBY</div>
           <div id="status-engine-pill" class="pill on" title="Active AI Vision Engine">ENGINE: TM</div>
@@ -735,8 +733,11 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <i class="fas fa-database text-xs"></i>
           </button>
 
-          <button id="btn-conn-esp32" onclick="window.openDeviceManagerModal()" class="btn-primary px-3 py-2 text-[10px] flex items-center gap-2" title="Device & Connection Manager">
-            <i id="btn-device-icon" class="fas fa-microchip"></i><span id="btn-device-label" class="hidden sm:inline">DEVICE MANAGER</span>
+          <button id="btn-conn-bt" onclick="window.connectBluetooth()" class="btn-primary px-3 py-2 text-[10px] flex items-center gap-2" title="Connect BBC micro:bit">
+            <i class="fab fa-bluetooth-b"></i><span class="hidden sm:inline" data-i18n="btn.connect">CONNECT</span>
+          </button>
+          <button id="btn-dis-bt" onclick="window.disconnectBluetooth()" disabled class="icon-btn danger" title="Disconnect micro:bit">
+            <i class="fas fa-xmark text-xs"></i>
           </button>
 
         <button onclick="window.logoutAdmin()" class="icon-btn" title="Back to Home">
@@ -787,11 +788,6 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
                   <option value="Arm">🦾 Lengan Robot (Arm)</option>
                 </select>
               </div>
-
-              <!-- Tombol Konfigurasi Pemetaan Kelas Warisan -->
-              <button type="button" onclick="window.openModal('legacy-mapping-modal')" class="text-xs px-2.5 py-1.5 rounded-lg border font-bold flex items-center gap-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition" style="border-color:var(--border)">
-                <i class="fas fa-map-location-dot text-blue-500"></i><span>Mapping Kelas AI</span>
-              </button>
             </div>
 
             <div class="flex items-center gap-2 w-full lg:w-auto justify-end">
@@ -819,24 +815,16 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
               Dalam mode <strong>MANUAL</strong>, deteksi kamera hanya bersifat visual dan <strong>tidak memicu gerakan robot otomatis</strong>. Pengguna mengendalikan eksekusi pemilahan secara langsung melalui stasiun kontrol ini.
             </p>
 
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
               <!-- 1. Perangkat Tujuan -->
               <div>
-                <label class="text-[11px] font-bold t-muted block mb-1">Perangkat Tujuan</label>
-                <select id="man-device-select" class="inp text-xs font-bold" onchange="window.handleManualDeviceChange(this.value)">
-                  <option value="ESP32">ESP32 DevKit V1</option>
-                  <option value="MICROBIT">BBC micro:bit</option>
-                </select>
+                <label class="text-[11px] font-bold t-muted block mb-1">Perangkat Target</label>
+                <div class="inp text-xs font-bold flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 cursor-default">
+                  <i class="fab fa-bluetooth-b text-indigo-500"></i>
+                  <span>BBC micro:bit (Bluetooth UART)</span>
+                </div>
               </div>
-              <!-- 2. Metode Koneksi -->
-              <div>
-                <label class="text-[11px] font-bold t-muted block mb-1">Metode Koneksi</label>
-                <select id="man-conn-select" class="inp text-xs font-bold" onchange="window.handleManualConnectionChange(this.value)">
-                  <option value="WIFI">Wi-Fi Lokal (HTTP REST)</option>
-                  <option value="BLE">Bluetooth BLE (GATT UART)</option>
-                </select>
-              </div>
-              <!-- 3. Mekanisme Target -->
+              <!-- 2. Mekanisme Target -->
               <div>
                 <label class="text-[11px] font-bold t-muted block mb-1">Mekanisme Target</label>
                 <select id="man-mech-select" class="inp text-xs font-bold">
@@ -844,7 +832,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
                   <option value="arm">🦾 Lengan Robot (Arm)</option>
                 </select>
               </div>
-              <!-- 4. Kelas Warna -->
+              <!-- 3. Kelas Warna -->
               <div>
                 <label class="text-[11px] font-bold t-muted block mb-1">Kelas Warna Sortir</label>
                 <select id="man-color-select" class="inp text-xs font-bold">
@@ -874,7 +862,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             </div>
           </div>
 
-          <!-- ============ STATUS TRANSAKSI & VERIFIKASI 2-TAHAP LIVE ============ -->
+          <!-- ============ STATUS TRANSAKSI LIVE ============ -->
           <div id="live-transaction-card" class="card p-3.5 mb-5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs bg-slate-50 dark:bg-slate-900/40">
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 font-bold">
@@ -885,46 +873,44 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
                   <strong class="t-main" id="tx-live-title">Status Transaksi: IDLE</strong>
                   <span id="tx-live-badge" class="pill gray text-[9px] uppercase">READY</span>
                 </div>
-                <p id="tx-live-detail" class="text-[11px] t-muted mt-0.5">Menunggu deteksi AI atau input perintah manual operator...</p>
+                <p id="tx-live-detail" class="text-[11px] t-muted mt-0.5">Menunggu deteksi AI (Teachable Machine / YOLO) atau input perintah operator...</p>
               </div>
             </div>
-            <div class="flex items-center gap-2 flex-wrap text-[10px]">
-              <span id="tx-stage-mech" class="pill gray">1. Mekanisme: Siap</span>
-              <span id="tx-stage-sort" class="pill gray">2. Kelas: Siap</span>
-              <span id="tx-stage-verif" class="pill gray">3. Sensor: Belum Terverifikasi Fisik</span>
+            <div class="flex items-center gap-2">
+              <span id="tx-status-device" class="pill blue font-bold"><i class="fab fa-bluetooth-b"></i> micro:bit Robot</span>
             </div>
           </div>
 
           <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 mb-5">
             <div class="card card-hover p-4 sm:p-5">
               <div class="metric-icon" style="background:var(--gold-soft);color:#8a6d1f"><i class="fas fa-boxes-stacked"></i></div>
-              <p class="metric-label" data-i18n="metric.total">Total Terverifikasi</p>
+              <p class="metric-label" data-i18n="metric.total">Total Disortir</p>
               <p id="stat-total" class="metric-value mt-1" style="color:var(--brand)">0</p>
-              <span class="text-[10px] font-bold text-amber-600 dark:text-amber-400 block mt-0.5"><span id="stat-sub-unverified">0</span> Belum Verif</span>
+              <span class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 block mt-0.5">Sukses: <span id="stat-rate">100%</span></span>
             </div>
             <div class="card card-hover p-4 sm:p-5">
               <div class="metric-icon" style="background:#fef3c7;color:#b45309"><i class="fas fa-circle"></i></div>
               <p class="metric-label" data-i18n="metric.yellow">Kuning</p>
               <p id="stat-kuning" class="metric-value mt-1 t-main">0</p>
-              <span class="text-[10px] text-amber-600 dark:text-amber-400 block mt-0.5 font-bold">Arm: <span id="stat-kuning-arm">0</span> | Flap: <span id="stat-kuning-servo">0</span></span>
+              <span class="text-[10px] text-amber-600 dark:text-amber-400 block mt-0.5 font-bold">Wadah Kuning</span>
             </div>
             <div class="card card-hover p-4 sm:p-5">
               <div class="metric-icon" style="background:#dbe4f5;color:#1a2456"><i class="fas fa-circle"></i></div>
               <p class="metric-label" data-i18n="metric.blue">Biru</p>
               <p id="stat-biru" class="metric-value mt-1 t-main">0</p>
-              <span class="text-[10px] text-blue-600 dark:text-blue-400 block mt-0.5 font-bold">Arm: <span id="stat-biru-arm">0</span> | Flap: <span id="stat-biru-servo">0</span></span>
+              <span class="text-[10px] text-blue-600 dark:text-blue-400 block mt-0.5 font-bold">Wadah Biru</span>
             </div>
             <div class="card card-hover p-4 sm:p-5">
               <div class="metric-icon" style="background:#fee2e2;color:#b91c1c"><i class="fas fa-circle"></i></div>
               <p class="metric-label" data-i18n="metric.red">Merah</p>
               <p id="stat-merah" class="metric-value mt-1 t-main">0</p>
-              <span class="text-[10px] text-red-600 dark:text-red-400 block mt-0.5 font-bold">Arm: <span id="stat-merah-arm">0</span> | Flap: <span id="stat-merah-servo">0</span></span>
+              <span class="text-[10px] text-red-600 dark:text-red-400 block mt-0.5 font-bold">Wadah Merah</span>
             </div>
             <div class="card card-hover p-4 sm:p-5 col-span-2 md:col-span-1" style="border-color:#fecaca">
               <div class="metric-icon" style="background:#fef2f2;color:#dc2626"><i class="fas fa-triangle-exclamation"></i></div>
-              <p class="metric-label" data-i18n="metric.error">Error</p>
+              <p class="metric-label" data-i18n="metric.error">Gagal / Missort</p>
               <p id="stat-error" class="metric-value mt-1" style="color:#dc2626">0</p>
-              <span class="text-[10px] text-rose-500 block mt-0.5 font-bold">Gagal / Timeout</span>
+              <span class="text-[10px] text-rose-500 block mt-0.5 font-bold">Missort / Timeout</span>
             </div>
           </div>
 
@@ -1012,9 +998,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
                 <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
                   <h3 class="card-title"><i class="fas fa-chart-column"></i><span data-i18n="chart.title">Distribusi Penyortiran</span></h3>
                   <div class="flex items-center gap-2 flex-wrap text-[10px]">
-                    <span class="pill green font-bold" id="dist-verified-pill"><i class="fas fa-circle-check"></i> Terverifikasi Fisik: <span id="chart-verified-count">0</span></span>
-                    <span class="pill yellow font-bold" id="dist-unverified-pill"><i class="fas fa-clock"></i> Belum Terverifikasi: <span id="chart-unverified-count">0</span></span>
-                    <span class="pill gray font-bold" id="dist-rate-pill">Akurasi Fisik: <span id="chart-success-rate">0.0%</span></span>
+                    <span class="pill gray font-bold" id="dist-rate-pill">Akurasi: <span id="chart-success-rate">100%</span></span>
                   </div>
                 </div>
                 <div class="h-[210px] sm:h-[240px]"><canvas id="sortingChart"></canvas></div>
@@ -1638,249 +1622,49 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     </div>
   </div>
 
-  <!-- ===================== MODAL: PEMETAAN KELAS AI KE MEKANISME ===================== -->
-  <div id="legacy-mapping-modal" class="modal">
-    <div class="modal-backdrop" onclick="window.closeModal('legacy-mapping-modal')"></div>
+
+
+  <!-- ===================== MODAL: BBC MICRO:BIT BLUETOOTH ===================== -->
+  <div id="microbit-modal" class="modal">
+    <div class="modal-backdrop" onclick="window.closeModal('microbit-modal')"></div>
     <div class="modal-panel max-w-md">
-      <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center justify-between mb-4">
         <div class="flex items-center gap-2.5">
           <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white shadow-sm bg-blue-600">
-            <i class="fas fa-map-location-dot text-sm"></i>
+            <i class="fab fa-bluetooth-b text-sm"></i>
           </div>
           <div>
-            <h3 class="font-black text-sm sm:text-base leading-tight t-main">Pemetaan Mekanisme Kelas AI</h3>
-            <p class="text-[10px] t-muted">Konfigurasi aksi fisik aktuator untuk setiap kelas warna</p>
+            <h3 class="font-black text-sm sm:text-base leading-tight t-main">BBC micro:bit Controller</h3>
+            <p class="text-[10px] t-muted">Web Bluetooth UART Service (6E400001)</p>
           </div>
         </div>
-        <button onclick="window.closeModal('legacy-mapping-modal')" class="icon-btn" aria-label="Tutup"><i class="fas fa-xmark"></i></button>
+        <button onclick="window.closeModal('microbit-modal')" class="icon-btn" aria-label="Tutup"><i class="fas fa-xmark text-xs"></i></button>
       </div>
 
-      <div class="space-y-3.5 mb-4 text-xs">
-        <div class="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-[11px] leading-relaxed">
-          <i class="fas fa-circle-info text-blue-600 mr-1"></i>
-          <strong>Model 6 Kelas</strong> (misal <code>merah_arm</code>, <code>biru_servo</code>) akan otomatis menentukan mekanisme tanpa perlu dipetakan. Dropdown di bawah khusus untuk <strong>model 3 warna standar</strong>.
-        </div>
-
-        <div class="space-y-2">
-          <!-- Merah -->
-          <div class="flex items-center justify-between p-2 rounded-lg border bg-slate-50 dark:bg-slate-900/50" style="border-color:var(--border)">
-            <span class="font-bold flex items-center gap-1.5"><i class="fas fa-circle text-red-600"></i> Warna Merah</span>
-            <select id="map-color-merah" class="inp !py-1 !px-2.5 text-xs font-bold w-40">
-              <option value="servo">🤖 Servo Flap</option>
-              <option value="arm">🦾 Lengan Robot (Arm)</option>
-            </select>
+      <div class="space-y-3 mb-4 text-xs">
+        <div class="p-3 rounded-xl border bg-slate-50 dark:bg-slate-900/50 space-y-2" style="border-color:var(--border)">
+          <div class="flex items-center justify-between">
+            <span class="font-bold">Status Perangkat:</span>
+            <span id="mbit-modal-status" class="pill gray">OFFLINE</span>
           </div>
-
-          <!-- Kuning -->
-          <div class="flex items-center justify-between p-2 rounded-lg border bg-slate-50 dark:bg-slate-900/50" style="border-color:var(--border)">
-            <span class="font-bold flex items-center gap-1.5"><i class="fas fa-circle text-amber-500"></i> Warna Kuning</span>
-            <select id="map-color-kuning" class="inp !py-1 !px-2.5 text-xs font-bold w-40">
-              <option value="servo">🤖 Servo Flap</option>
-              <option value="arm">🦾 Lengan Robot (Arm)</option>
-            </select>
-          </div>
-
-          <!-- Biru -->
-          <div class="flex items-center justify-between p-2 rounded-lg border bg-slate-50 dark:bg-slate-900/50" style="border-color:var(--border)">
-            <span class="font-bold flex items-center gap-1.5"><i class="fas fa-circle text-blue-600"></i> Warna Biru</span>
-            <select id="map-color-biru" class="inp !py-1 !px-2.5 text-xs font-bold w-40">
-              <option value="servo">🤖 Servo Flap</option>
-              <option value="arm" selected>🦾 Lengan Robot (Arm)</option>
-            </select>
+          <div class="flex items-center justify-between pt-1 border-t" style="border-color:var(--border)">
+            <div>
+              <span class="font-bold block">Mode Simulasi Virtual:</span>
+              <span class="text-[10px] t-muted">Gunakan jika tidak ada hardware fisik micro:bit</span>
+            </div>
+            <input type="checkbox" id="mbit-sim-toggle" onchange="window.toggleDeviceSim(this.checked)" class="toggle-checkbox">
           </div>
         </div>
+        <p class="text-[11px] t-muted leading-relaxed">
+          Hubungkan website ke robot BBC micro:bit melalui Bluetooth Low Energy untuk menggerakkan servo/arm sesuai hasil klasifikasi AI (Teachable Machine / YOLO).
+        </p>
       </div>
 
       <div class="flex gap-2 justify-end pt-2 border-t" style="border-color:var(--border)">
-        <button type="button" onclick="window.closeModal('legacy-mapping-modal')" class="btn-ghost px-4 py-2 text-xs">Batal</button>
-        <button type="button" onclick="window.saveLegacyMapping()" class="btn-primary px-4 py-2 text-xs font-bold flex items-center gap-1.5">
-          <i class="fas fa-floppy-disk"></i><span>Simpan Pemetaan</span>
+        <button type="button" onclick="window.disconnectBluetooth(); window.closeModal('microbit-modal');" class="btn-ghost px-3 py-2 text-xs">Putuskan</button>
+        <button type="button" onclick="window.connectBluetooth(); window.closeModal('microbit-modal');" class="btn-primary px-4 py-2 text-xs font-bold flex items-center gap-1.5">
+          <i class="fab fa-bluetooth-b"></i><span>Hubungkan micro:bit</span>
         </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===================== MODAL: DEVICE & CONNECTION MANAGER ===================== -->
-  <div id="esp32-modal" class="modal">
-    <div class="modal-backdrop" onclick="window.closeModal('esp32-modal')"></div>
-    <div class="modal-panel max-w-lg">
-      <div class="flex items-center justify-between mb-3">
-        <div class="flex items-center gap-2.5">
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white shadow-sm" style="background:var(--brand)">
-            <i class="fas fa-microchip text-sm"></i>
-          </div>
-          <div>
-            <h3 class="font-black text-sm sm:text-base leading-tight t-main flex items-center gap-1.5">
-              <span>Device &amp; Connection Manager</span>
-              <span class="text-[9px] px-2 py-0.5 rounded-full font-bold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">Admin</span>
-            </h3>
-            <p class="text-[10px] t-muted">Konfigurasi perangkat robotik mikrokontroler &amp; protokol komunikasi</p>
-          </div>
-        </div>
-        <button onclick="window.closeModal('esp32-modal')" class="icon-btn"><i class="fas fa-xmark text-xs"></i></button>
-      </div>
-
-      <div class="space-y-3.5 text-xs">
-        <!-- 1. Pilihan Mikrokontroler Hardware -->
-        <div>
-          <label class="block font-bold mb-1.5 t-main text-[11px] uppercase tracking-wider">1. Pilih Mikrokontroler</label>
-          <div class="grid grid-cols-2 gap-2">
-            <!-- ESP32 Option -->
-            <label id="opt-device-esp32" class="device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20">
-              <input type="radio" name="dev-type-select" value="ESP32" checked onchange="window.onDeviceSelectChange(this.value)" class="sr-only">
-              <div class="flex items-center justify-between mb-1">
-                <span class="font-black text-xs t-main flex items-center gap-1.5">
-                  <i class="fas fa-bolt text-amber-500"></i> ESP32 DevKit V1
-                </span>
-                <i id="icon-check-esp32" class="fas fa-circle-check text-blue-600 text-xs"></i>
-              </div>
-              <p class="text-[10px] t-muted leading-relaxed">Dual core 32-bit dengan Wi-Fi 2.4GHz &amp; BLE onboard.</p>
-            </label>
-
-            <!-- micro:bit Option -->
-            <label id="opt-device-microbit" class="device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400">
-              <input type="radio" name="dev-type-select" value="MICROBIT" onchange="window.onDeviceSelectChange(this.value)" class="sr-only">
-              <div class="flex items-center justify-between mb-1">
-                <span class="font-black text-xs t-main flex items-center gap-1.5">
-                  <i class="fas fa-cube text-emerald-500"></i> BBC micro:bit
-                </span>
-                <i id="icon-check-microbit" class="far fa-circle text-slate-400 text-xs"></i>
-              </div>
-              <p class="text-[10px] t-muted leading-relaxed">Nordic nRF52833 dengan MakeCode BLE UART service.</p>
-            </label>
-          </div>
-        </div>
-
-        <!-- 2. Pilihan Protokol Komunikasi -->
-        <div>
-          <label class="block font-bold mb-1.5 t-main text-[11px] uppercase tracking-wider">2. Metode Koneksi</label>
-          <div class="grid grid-cols-2 gap-2">
-            <!-- Wi-Fi REST -->
-            <label id="opt-conn-wifi" class="conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20">
-              <input type="radio" name="conn-type-select" value="WIFI" checked onchange="window.onConnSelectChange(this.value)" class="sr-only">
-              <div class="flex items-center justify-between mb-0.5">
-                <span class="font-bold text-xs t-main flex items-center gap-1.5">
-                  <i class="fas fa-wifi text-blue-500"></i> Wi-Fi (HTTP REST)
-                </span>
-                <i id="icon-check-wifi" class="fas fa-circle-check text-blue-600 text-xs"></i>
-              </div>
-              <p class="text-[10px] t-muted">SoftAP 192.168.4.1 / Jaringan LAN lokal sekolah.</p>
-            </label>
-
-            <!-- BLE -->
-            <label id="opt-conn-ble" class="conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400">
-              <input type="radio" name="conn-type-select" value="BLE" onchange="window.onConnSelectChange(this.value)" class="sr-only">
-              <div class="flex items-center justify-between mb-0.5">
-                <span class="font-bold text-xs t-main flex items-center gap-1.5">
-                  <i class="fab fa-bluetooth-b text-indigo-500"></i> Bluetooth (BLE)
-                </span>
-                <i id="icon-check-ble" class="far fa-circle text-slate-400 text-xs"></i>
-              </div>
-              <p class="text-[10px] t-muted">Web Bluetooth GATT Nordic UART Service.</p>
-            </label>
-          </div>
-
-          <!-- Microbit Wi-Fi Notice -->
-          <div id="mbit-wifi-disabled-note" class="hidden mt-1.5 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 text-[10px] border border-amber-200 dark:border-amber-800 flex items-center gap-2">
-            <i class="fas fa-circle-info"></i>
-            <span>BBC micro:bit tidak memiliki chip Wi-Fi bawaan. Jalur koneksi dikunci pada <strong>Bluetooth Low Energy (BLE)</strong>.</span>
-          </div>
-        </div>
-
-        <!-- 3. Parameter Konfigurasi -->
-        <!-- Bagian A: Wi-Fi Setup Form -->
-        <div id="section-config-wifi" class="space-y-2 p-3 rounded-xl border" style="background:var(--surface-soft);border-color:var(--border)">
-          <div class="flex items-center justify-between">
-            <label class="font-bold text-[11px] t-main">Alamat IP / Host REST API</label>
-            <span class="text-[10px] text-emerald-600 font-mono font-bold">Port :80</span>
-          </div>
-          <div class="flex gap-2">
-            <input type="text" id="esp32-host-input" class="inp flex-1 font-mono text-[11px]" placeholder="http://192.168.4.1" value="http://192.168.4.1">
-            <button id="btn-esp32-ping" onclick="window.pingCurrentDevice()" class="btn-primary px-3 py-1.5 text-[11px] whitespace-nowrap">
-              <i class="fas fa-bolt mr-1"></i>Test Ping
-            </button>
-          </div>
-          <div class="flex flex-wrap gap-1.5 pt-0.5">
-            <span class="text-[10px] t-muted mr-1">Preset:</span>
-            <button type="button" onclick="document.getElementById('esp32-host-input').value='http://192.168.4.1'" class="text-[10px] px-2 py-0.5 rounded border t-main hover:bg-slate-200 dark:hover:bg-slate-700">192.168.4.1 (SoftAP)</button>
-            <button type="button" onclick="document.getElementById('esp32-host-input').value=window.location.origin+'/api/esp32'" class="text-[10px] px-2 py-0.5 rounded border t-main hover:bg-slate-200 dark:hover:bg-slate-700">Proxy (/api/esp32)</button>
-            <button type="button" onclick="document.getElementById('esp32-host-input').value='http://192.168.1.100'" class="text-[10px] px-2 py-0.5 rounded border t-main hover:bg-slate-200 dark:hover:bg-slate-700">LAN (192.168.1.100)</button>
-          </div>
-        </div>
-
-        <!-- Bagian B: BLE Setup Form -->
-        <div id="section-config-ble" class="hidden space-y-2.5 p-3 rounded-xl border" style="background:var(--surface-soft);border-color:var(--border)">
-          <div class="flex items-center justify-between">
-            <label class="font-bold text-[11px] t-main">Filter Nama Perangkat BLE</label>
-            <span class="text-[10px] t-muted font-mono">UART UUID: 6E400001</span>
-          </div>
-          <input type="text" id="ble-name-input" class="inp w-full font-mono text-[11px]" placeholder="VERNOVA atau BBC micro:bit" value="VERNOVA">
-          
-          <!-- Banner Kompatibilitas Browser Web Bluetooth -->
-          <div id="ble-compat-banner" class="p-2.5 rounded-lg text-[10px] border"></div>
-        </div>
-
-        <!-- 4. Mode Simulasi (Virtual Hardware) -->
-        <div class="flex items-center justify-between p-3 rounded-xl border" style="background:var(--surface-soft);border-color:var(--border)">
-          <div>
-            <p class="font-bold t-main text-[11px] flex items-center gap-1.5">
-              <span>Mode Simulasi (Virtual Hardware)</span>
-              <span id="sim-active-badge" class="hidden text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-100 text-amber-800">ACTIVE</span>
-            </p>
-            <p class="text-[10px] t-muted mt-0.5">Uji coba AI Vision, aktuator, dan dashboard tanpa hardware fisik.</p>
-          </div>
-          <input type="checkbox" id="esp32-sim-toggle" onchange="window.toggleDeviceSim(this.checked)" class="w-4 h-4 cursor-pointer">
-        </div>
-
-        <!-- 5. Telemetri Diagnostik Real-Time -->
-        <div id="esp32-telemetry-box" class="p-3 rounded-xl border space-y-1.5 text-[11px]" style="background:var(--surface-soft);border-color:var(--border)">
-          <div class="flex justify-between items-center pb-1 border-b" style="border-color:var(--border)">
-            <span class="font-bold t-main text-[10px] uppercase">Telemetri Perangkat</span>
-            <span id="esp32-diag-status" class="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200">DISCONNECTED</span>
-          </div>
-          <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
-            <div class="flex justify-between">
-              <span class="t-muted">Perangkat:</span>
-              <span id="device-diag-type" class="font-bold font-mono">ESP32 (Wi-Fi)</span>
-            </div>
-            <div class="flex justify-between">
-              <span class="t-muted">Device ID:</span>
-              <span id="esp32-diag-id" class="font-mono truncate max-w-[110px]">—</span>
-            </div>
-            <div class="flex justify-between">
-              <span class="t-muted">Sinyal / RSSI:</span>
-              <span id="esp32-diag-rssi" class="font-mono">—</span>
-            </div>
-            <div class="flex justify-between">
-              <span class="t-muted">Heap / Protokol:</span>
-              <span id="esp32-diag-heap" class="font-mono">—</span>
-            </div>
-            <div class="flex justify-between col-span-2">
-              <span class="t-muted">Aktivitas Terakhir:</span>
-              <span id="esp32-diag-uptime" class="font-mono truncate max-w-[200px]">—</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Action Controls -->
-        <div class="space-y-2 pt-1">
-          <div class="grid grid-cols-2 gap-2">
-            <button id="btn-save-device-conn" onclick="window.saveAndConnectDevice()" class="btn-primary py-2.5 text-xs flex items-center justify-center gap-2">
-              <i class="fas fa-plug"></i><span>SIMPAN &amp; HUBUNGKAN</span>
-            </button>
-            <button id="btn-pulse-device" onclick="window.sendTestPulseDevice()" class="btn-ghost py-2.5 text-xs flex items-center justify-center gap-2 border">
-              <i class="fas fa-wave-square text-indigo-500"></i><span>TEST PULSE (AMAN)</span>
-            </button>
-          </div>
-          <div class="flex justify-between items-center pt-1">
-            <button type="button" onclick="window.disconnectCurrentDevice()" class="text-[11px] text-red-500 hover:underline flex items-center gap-1">
-              <i class="fas fa-power-off"></i><span>Putuskan Koneksi</span>
-            </button>
-            <button type="button" onclick="window.viewDeviceLogs()" class="text-[11px] t-muted hover:underline flex items-center gap-1">
-              <i class="fas fa-list-check"></i><span>Buka Log Perangkat</span>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -1981,7 +1765,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     <div class="jarvis-chips" id="jarvis-chips"></div>
     <div class="jarvis-input">
       <button class="icon-btn" id="jarvis-mic" title="Bicara" onclick="window.jarvisListen()"><i class="fas fa-microphone text-xs"></i></button>
-      <input type="text" id="jarvis-text" class="inp" placeholder="Tanya data sortir, error, mode, status ESP32..." autocomplete="off" onkeydown="if(event.key==='Enter')window.jarvisSend()">
+      <input type="text" id="jarvis-text" class="inp" placeholder="Tanya data sortir, error, mode, status robot..." autocomplete="off" onkeydown="if(event.key==='Enter')window.jarvisSend()">
       <button class="btn-primary px-3" title="Kirim" onclick="window.jarvisSend()"><i class="fas fa-paper-plane text-xs"></i></button>
     </div>
   </div>
@@ -2332,358 +2116,99 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   }
 
   function updateDeviceUI(ev) {
-    const pill = $('status-esp32');
-    const diagStatus = $('esp32-diag-status');
-    const diagDevType = $('device-diag-type');
-    const diagId = $('esp32-diag-id');
-    const diagRssi = $('esp32-diag-rssi');
-    const diagHeap = $('esp32-diag-heap');
-    const diagUptime = $('esp32-diag-uptime');
+    const pill = $('status-bt') || $('status-esp32');
+    const btnConn = $('btn-conn-bt');
+    const btnDis = $('btn-dis-bt');
+    const modalStatus = $('mbit-modal-status');
     const simBadge = $('sim-active-badge');
-    const btnIcon = $('btn-device-icon');
-    const btnLabel = $('btn-device-label');
 
-    const st = ev.status || (window.deviceManager ? window.deviceManager.getStatus().state : 'DISCONNECTED');
-    const cfg = window.deviceManager ? window.deviceManager.config : { deviceType: 'ESP32', connectionType: 'WIFI' };
-    const devShort = cfg.deviceType === 'MICROBIT' ? 'micro:bit' : 'ESP32';
-    const connShort = cfg.connectionType === 'BLE' ? 'BLE' : 'Wi-Fi';
+    const st = (ev && ev.status) || (window.deviceManager && typeof window.deviceManager.getStatus === 'function' ? window.deviceManager.getStatus().state : 'DISCONNECTED');
+    const isSim = window.deviceManager && typeof window.deviceManager.isSimulated === 'function' ? window.deviceManager.isSimulated() : false;
 
     if (pill) {
       if (st === 'CONNECTED' || st === 'READY') {
-        setPill(pill, 'blue', `${devShort} (${connShort}): ON`);
+        setPill(pill, 'blue', 'micro:bit: ON');
       } else if (st === 'BUSY') {
-        setPill(pill, 'warn', `${devShort}: BUSY`);
-      } else if (st === 'SIMULATED') {
-        setPill(pill, 'on', `${devShort}: SIMULASI`);
+        setPill(pill, 'warn', 'micro:bit: BUSY');
+      } else if (st === 'SIMULATED' || isSim) {
+        setPill(pill, 'on', 'micro:bit: SIMULASI');
       } else if (st === 'CONNECTING') {
-        setPill(pill, 'warn', `${devShort}: CONNECTING...`);
+        setPill(pill, 'warn', 'micro:bit: CONNECTING...');
       } else {
-        setPill(pill, 'off', `${devShort}: OFFLINE`);
+        setPill(pill, 'off', 'micro:bit: OFFLINE');
       }
     }
 
-    if (btnIcon && btnLabel) {
-      if (cfg.connectionType === 'BLE') {
-        btnIcon.className = 'fab fa-bluetooth-b';
+    if (btnConn && btnDis) {
+      if (st === 'CONNECTED' || st === 'READY' || isSim) {
+        btnConn.classList.add('hidden');
+        btnDis.classList.remove('hidden');
       } else {
-        btnIcon.className = 'fas fa-wifi';
-      }
-      btnLabel.innerText = `${devShort.toUpperCase()} ${connShort.toUpperCase()}`;
-    }
-
-    if (diagStatus) {
-      diagStatus.innerText = st;
-      if (st === 'CONNECTED' || st === 'READY') {
-        diagStatus.className = 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
-      } else if (st === 'SIMULATED') {
-        diagStatus.className = 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200';
-      } else if (st === 'BUSY' || st === 'CONNECTING') {
-        diagStatus.className = 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200';
-      } else {
-        diagStatus.className = 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200';
+        btnConn.classList.remove('hidden');
+        btnDis.classList.add('hidden');
       }
     }
 
-    if (diagDevType) diagDevType.innerText = `${cfg.deviceType === 'MICROBIT' ? 'BBC micro:bit' : 'ESP32 DevKit V1'} (${connShort})`;
-    if (simBadge) simBadge.classList.toggle('hidden', !window.deviceManager.isSimulated());
-
-    const activeAdapter = window.deviceManager ? window.deviceManager.getActiveAdapter() : null;
-    const telem = activeAdapter ? activeAdapter.lastTelemetry : null;
-    if (telem) {
-      if (diagId) diagId.innerText = telem.deviceId || '—';
-      if (diagRssi) diagRssi.innerText = (telem.wifiRssi || telem.rssi) ? `${telem.wifiRssi || telem.rssi} dBm` : '—';
-      if (diagHeap) diagHeap.innerText = telem.freeHeap ? `${(telem.freeHeap / 1024).toFixed(1)} KB` : (telem.protocol || 'OK');
-      if (diagUptime) {
-        if (ev && ev.sensorState) {
-          diagUptime.innerText = `Sensor: ${ev.sensorState.state} · ${new Date().toLocaleTimeString('id-ID')}`;
-        } else {
-          diagUptime.innerText = telem.uptimeSec ? `${telem.uptimeSec}s` : (telem.lastSeen ? new Date(telem.lastSeen).toLocaleTimeString('id-ID') : 'Aktif');
-        }
-      }
+    if (modalStatus) {
+      modalStatus.innerText = isSim ? 'SIMULASI' : st;
+      modalStatus.className = (st === 'CONNECTED' || st === 'READY' || isSim)
+        ? 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+        : 'px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200';
     }
 
-    // Pembaruan Real-Time Notifikasi Telemetri Sensor Fisik dari ESP32
-    if (ev && ev.type === 'sensor_telemetry' && ev.sensorState) {
-      const stageVerif = $('tx-stage-verif');
-      const manVerif = $('man-verif-pill');
-      const sName = ev.sensorName ? ev.sensorName.toUpperCase() : null;
-      const sPin = ev.pin ? `GPIO ${ev.pin}` : null;
-      const sDesc = sName ? `Sensor ${sName}${sPin ? ' (' + sPin + ')' : ''}` : 'Sensor Fisik';
-
-      if (ev.sensorState.objectPresent) {
-        if (stageVerif) {
-          stageVerif.className = 'pill green';
-          stageVerif.innerText = `3. ${sDesc}: Objek Terdeteksi (VERIFIED)`;
-        }
-        if (manVerif) {
-          manVerif.innerText = `VERIFIKASI: VALID SENSOR (${sName || 'OK'})`;
-          manVerif.className = 'pill green';
-        }
-        try {
-          logActivity("fas fa-check-circle", "background:rgba(34,197,94,.15);color:#22c55e", `${sDesc} Terverifikasi`, "Objek terkonfirmasi masuk ke wadah tujuan sortir");
-        } catch (e) {}
-      } else {
-        const isTxVerified = Boolean(window.deviceManager && window.deviceManager.currentTransaction && window.deviceManager.currentTransaction.verified);
-        if (stageVerif && !isTxVerified) {
-          stageVerif.className = 'pill yellow';
-          stageVerif.innerText = `3. ${sDesc}: Objek Belum Terdeteksi`;
-        }
-        if (manVerif && !isTxVerified) {
-          manVerif.innerText = 'VERIFIKASI: BELUM TERVERIFIKASI FISIK';
-        }
-      }
-    }
-
-    // Pembaruan Real-Time Tahapan Siklus Conveyor & ARM
-    if (ev && ev.type === 'stage_update' && ev.stage) {
-      const stageMech = $('tx-stage-mech');
-      const stageSort = $('tx-stage-sort');
-      const stageVerif = $('tx-stage-verif');
-      
-      if (ev.stage === 'OBJECT_DETECTED') {
-        if (stageSort) {
-          stageSort.className = 'pill yellow';
-          stageSort.innerText = '2. Objek: Terdeteksi di Area ARM (GPIO 34)';
-        }
-        try { logActivity("fas fa-crosshairs", "background:rgba(234,179,8,.15);color:#eab308", "Objek Terdeteksi", "Sensor ARM GPIO 34 mendeteksi objek, belt dihentikan"); } catch (e) {}
-      } else if (ev.stage === 'BELT_STOPPED') {
-        try { logActivity("fas fa-pause", "background:rgba(239,68,68,.15);color:#ef4444", "Belt Berhenti", "Conveyor belt berhenti saat objek berada di area ARM"); } catch (e) {}
-      } else if (ev.stage === 'ARM_WORKING') {
-        if (stageMech) {
-          stageMech.className = 'pill yellow animate-pulse';
-          stageMech.innerText = '1. Mekanisme: ARM Memindahkan Objek...';
-        }
-        try { logActivity("fas fa-robot", "background:rgba(99,102,241,.15);color:#6366f1", "ARM Bekerja", "Lengan robotik memindahkan objek menuju jalur/wadah warna"); } catch (e) {}
-      } else if (ev.stage === 'TARGET_DETECTED') {
-        if (stageVerif) {
-          stageVerif.className = 'pill green';
-          stageVerif.innerText = '3. Sensor: Objek di Wadah Tujuan (VERIFIED)';
-        }
-        try { logActivity("fas fa-check-double", "background:rgba(34,197,94,.15);color:#22c55e", "Target Terdeteksi", "Sensor tujuan warna mengonfirmasi objek di wadah sortir"); } catch (e) {}
-      } else if (ev.stage === 'BELT_RESUMED') {
-        try { logActivity("fas fa-play", "background:rgba(59,130,246,.15);color:#3b82f6", "Belt Berjalan", "Sensor ARM GPIO 34 clear, conveyor belt berjalan kembali"); } catch (e) {}
-      }
-    }
+    if (simBadge) simBadge.classList.toggle('hidden', !isSim);
   }
 
-  /* Admin Security Guard: Hanya admin terautentikasi yang dapat membuka & mengonfigurasi perangkat */
-  window.openDeviceManagerModal = () => {
-    const isAdmin = sessionStorage.getItem('rlab_admin_auth') === '1';
-    if (!isAdmin) {
-      showToast(state.lang === 'id' 
-        ? "Akses Dibatasi: Hanya Administrator yang dapat mengonfigurasi perangkat keras robotik." 
-        : "Access Restricted: Only Administrator can configure robotics hardware.");
-      const g = $('login-gate');
-      if (g) g.classList.remove('hide');
-      return;
-    }
-    syncDeviceModalFields();
-    window.openModal('esp32-modal');
-  };
-
-  /* Sinkronisasi nilai form modal dari state DeviceConnectionManager */
-  function syncDeviceModalFields() {
-    const cfg = window.deviceManager ? window.deviceManager.config : { deviceType: 'ESP32', connectionType: 'WIFI' };
-    
-    // Pilih radio device
-    const rDev = document.querySelector(`input[name="dev-type-select"][value="${cfg.deviceType}"]`);
-    if (rDev) rDev.checked = true;
-    window.onDeviceSelectChange(cfg.deviceType, false);
-
-    // Pilih radio connection
-    const rConn = document.querySelector(`input[name="conn-type-select"][value="${cfg.connectionType}"]`);
-    if (rConn) rConn.checked = true;
-    window.onConnSelectChange(cfg.connectionType, false);
-
-    // Nilai host / deviceName / sim
-    const hostInp = $('esp32-host-input');
-    if (hostInp && cfg.host) hostInp.value = cfg.host;
-
-    const bleInp = $('ble-name-input');
-    if (bleInp) bleInp.value = cfg.deviceName || (cfg.deviceType === 'MICROBIT' ? 'BBC micro:bit' : 'VERNOVA');
-
-    const simToggle = $('esp32-sim-toggle');
-    if (simToggle) simToggle.checked = Boolean(cfg.simulationMode);
-
-    // Evaluasi dukungan Web Bluetooth browser secara live
-    const banner = $('ble-compat-banner');
-    if (banner) {
-      const isBleOk = typeof navigator !== 'undefined' && Boolean(navigator.bluetooth);
-      if (isBleOk) {
-        banner.className = 'p-2.5 rounded-lg text-[10px] border border-emerald-200 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-800 flex items-center gap-2';
-        banner.innerHTML = '<i class="fas fa-check-circle text-emerald-600"></i><span><strong>Web Bluetooth Didukung:</strong> Siap memindai GATT UART (Chromium Desktop HTTPS / localhost).</span>';
-      } else {
-        banner.className = 'p-2.5 rounded-lg text-[10px] border border-amber-200 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-800 flex items-start gap-2';
-        banner.innerHTML = '<i class="fas fa-triangle-exclamation text-amber-600 mt-0.5"></i><div><strong>Web Bluetooth Tidak Didukung di Browser Ini:</strong> Browser saat ini (mis. Firefox, Safari, atau non-HTTPS) memblokir Bluetooth langsung. Gunakan <strong>Google Chrome</strong> / <strong>Microsoft Edge</strong> desktop. Anda dapat menggunakan <strong>Mode Simulasi</strong> untuk pengujian tanpa hardware.</div>';
-      }
-    }
-
-    // Refresh UI telemetri
-    updateDeviceUI({ status: window.deviceManager ? window.deviceManager.getStatus().state : 'OFFLINE' });
-  }
-
-  /* Handler saat user memilih tipe mikrokontroler (ESP32 vs micro:bit) */
-  window.onDeviceSelectChange = (devType, syncConn = true) => {
-    const isMbit = devType === 'MICROBIT';
-    const optEsp32 = $('opt-device-esp32');
-    const optMbit = $('opt-device-microbit');
-    const iconEsp32 = $('icon-check-esp32');
-    const iconMbit = $('icon-check-microbit');
-
-    if (optEsp32 && optMbit) {
-      if (isMbit) {
-        optMbit.className = 'device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20';
-        optEsp32.className = 'device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400';
-        if (iconMbit) iconMbit.className = 'fas fa-circle-check text-emerald-600 text-xs';
-        if (iconEsp32) iconEsp32.className = 'far fa-circle text-slate-400 text-xs';
-      } else {
-        optEsp32.className = 'device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
-        optMbit.className = 'device-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400';
-        if (iconEsp32) iconEsp32.className = 'fas fa-circle-check text-blue-600 text-xs';
-        if (iconMbit) iconMbit.className = 'far fa-circle text-slate-400 text-xs';
-      }
-    }
-
-    // micro:bit tidak mendukung Wi-Fi onboard -> disable Wi-Fi radio & beralih ke BLE
-    const rWifi = document.querySelector('input[name="conn-type-select"][value="WIFI"]');
-    const optWifi = $('opt-conn-wifi');
-    const mbitNote = $('mbit-wifi-disabled-note');
-
-    if (isMbit) {
-      if (rWifi) rWifi.disabled = true;
-      if (optWifi) optWifi.classList.add('opacity-40', 'cursor-not-allowed');
-      if (mbitNote) mbitNote.classList.remove('hidden');
-      if (syncConn) {
-        const rBle = document.querySelector('input[name="conn-type-select"][value="BLE"]');
-        if (rBle) rBle.checked = true;
-        window.onConnSelectChange('BLE', false);
-      }
-    } else {
-      if (rWifi) rWifi.disabled = false;
-      if (optWifi) optWifi.classList.remove('opacity-40', 'cursor-not-allowed');
-      if (mbitNote) mbitNote.classList.add('hidden');
-    }
-  };
-
-  /* Handler saat user memilih metode koneksi (Wi-Fi vs BLE) */
-  window.onConnSelectChange = (connType) => {
-    const isBle = connType === 'BLE';
-    const optWifi = $('opt-conn-wifi');
-    const optBle = $('opt-conn-ble');
-    const iconWifi = $('icon-check-wifi');
-    const iconBle = $('icon-check-ble');
-    const secWifi = $('section-config-wifi');
-    const secBle = $('section-config-ble');
-
-    if (optWifi && optBle) {
-      if (isBle) {
-        optBle.className = 'conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/20';
-        optWifi.className = 'conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400';
-        if (iconBle) iconBle.className = 'fas fa-circle-check text-indigo-600 text-xs';
-        if (iconWifi) iconWifi.className = 'far fa-circle text-slate-400 text-xs';
-      } else {
-        optWifi.className = 'conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
-        optBle.className = 'conn-card-option flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 hover:border-slate-400';
-        if (iconWifi) iconWifi.className = 'fas fa-circle-check text-blue-600 text-xs';
-        if (iconBle) iconBle.className = 'far fa-circle text-slate-400 text-xs';
-      }
-    }
-
-    if (secWifi && secBle) {
-      secWifi.classList.toggle('hidden', isBle);
-      secBle.classList.toggle('hidden', !isBle);
-    }
-  };
-
-  /* Simpan konfigurasi & Hubungkan ke perangkat */
-  window.saveAndConnectDevice = async () => {
-    const devType = document.querySelector('input[name="dev-type-select"]:checked')?.value || 'ESP32';
-    const connType = document.querySelector('input[name="conn-type-select"]:checked')?.value || 'WIFI';
-    const host = ($('esp32-host-input')?.value || '').trim();
-    const bleName = ($('ble-name-input')?.value || '').trim();
-    const isSim = $('esp32-sim-toggle')?.checked;
-
-    showToast(state.lang === 'id' ? `Menyimpan & Menghubungkan ke ${devType} (${connType})...` : `Connecting to ${devType} (${connType})...`);
-
+  /* Web Bluetooth micro:bit connection */
+  window.connectBluetooth = async () => {
+    showToast(state.lang === 'id' ? "Menghubungkan ke micro:bit Bluetooth..." : "Connecting to micro:bit Bluetooth...");
     try {
-      await window.deviceManager.switchDevice(devType, connType, {
-        host: host || 'http://192.168.4.1',
-        deviceName: bleName,
-        simulationMode: isSim
-      });
-
       const res = await window.deviceManager.connect();
       if (res && res.ok) {
-        showToast(state.lang === 'id' 
-          ? `Sukses Terhubung ke ${devType}! (${res.simulated ? 'Mode Simulasi' : (res.telemetry?.deviceId || 'Online')})`
-          : `Connected to ${devType}!`);
-        logActivity("fas fa-plug-circle-check", "background:rgba(34,197,94,.15);color:#22c55e", "Device Connected", `${devType} (${connType}) - ${host || bleName || 'Ready'}`);
-        window.closeModal('esp32-modal');
+        showToast(state.lang === 'id'
+          ? `Sukses Terhubung ke micro:bit! (${res.simulated ? 'Mode Simulasi' : (res.telemetry?.deviceId || 'Online')})`
+          : `Connected to micro:bit!`);
+        logActivity("fas fa-plug-circle-check", "background:rgba(34,197,94,.15);color:#22c55e", "micro:bit Connected", res.simulated ? "Mode Simulasi" : (res.telemetry?.deviceId || "BLE UART"));
+        window.closeModal('microbit-modal');
       } else {
         showToast((state.lang === 'id' ? "Gagal tersambung: " : "Connection failed: ") + (res?.error || 'Offline'));
       }
     } catch (err) {
-      showToast("Error konfigurasi: " + err.message);
+      showToast("Error Bluetooth: " + err.message);
     }
   };
 
-  /* Uji Ping / Handshake */
-  window.pingCurrentDevice = async () => {
-    showToast(state.lang === 'id' ? "Memeriksa status perangkat..." : "Testing device connection...");
-    const res = await window.deviceManager.connect();
-    if (res && res.ok) {
-      showToast(state.lang === 'id' 
-        ? `Perangkat Merespons! (${res.simulated ? 'Simulasi' : (res.telemetry?.deviceId || 'Online')})` 
-        : `Device Responded!`);
-      logActivity("fas fa-bolt", "background:rgba(34,197,94,.15);color:#22c55e", "Ping Success", `${window.deviceManager.config.deviceType} Online`);
-    } else {
-      showToast((state.lang === 'id' ? "Perangkat tidak merespons: " : "Device unreachable: ") + (res?.error || 'Offline'));
-    }
-  };
-
-  /* Safe Test Pulse: Uji aktuator tanpa siklus sortir penuh */
-  window.sendTestPulseDevice = async () => {
-    showToast(state.lang === 'id' ? "Mengirim Test Pulse (Aman)..." : "Sending safe test pulse...");
-    try {
-      const res = await window.deviceManager.sendTestPulse();
-      if (res && res.ok) {
-        showToast(state.lang === 'id' ? "Test pulse terkonfirmasi aman!" : "Test pulse acknowledged!");
-        logActivity("fas fa-wave-square", "background:rgba(99,102,241,.15);color:#6366f1", "Safe Test Pulse", `${window.deviceManager.config.deviceType} Pulse OK`);
-      } else {
-        showToast("Test pulse gagal: " + (res?.error || 'No response'));
-      }
-    } catch (err) {
-      showToast("Error test pulse: " + err.message);
-    }
-  };
-
-  /* Putuskan koneksi aktif */
-  window.disconnectCurrentDevice = async () => {
+  window.disconnectBluetooth = async () => {
     await window.deviceManager.disconnect();
-    showToast(state.lang === 'id' ? "Koneksi perangkat diputuskan." : "Device disconnected.");
-    logActivity("fas fa-power-off", "background:rgba(239,68,68,.15);color:#ef4444", "Device Disconnected", "Manual disconnect");
+    showToast(state.lang === 'id' ? "Koneksi micro:bit diputuskan." : "micro:bit disconnected.");
+    logActivity("fas fa-power-off", "background:rgba(239,68,68,.15);color:#ef4444", "micro:bit Disconnected", "Manual disconnect");
   };
 
-  /* Toggle mode simulasi */
+  window.openDeviceManagerModal = () => {
+    const isSim = window.deviceManager && typeof window.deviceManager.isSimulated === 'function' ? window.deviceManager.isSimulated() : false;
+    const simToggle = $('mbit-sim-toggle');
+    if (simToggle) simToggle.checked = isSim;
+    updateDeviceUI({ status: window.deviceManager ? window.deviceManager.getStatus().state : 'OFFLINE' });
+    window.openModal('microbit-modal');
+  };
+
   window.toggleDeviceSim = (isSim) => {
-    window.deviceManager.setSimulation(isSim);
+    if (window.deviceManager && typeof window.deviceManager.setSimulation === 'function') {
+      window.deviceManager.setSimulation(isSim);
+    }
     showToast(isSim 
       ? "Mode Simulasi Aktif (Hardware Virtual Siap Uji)" 
       : "Mode Simulasi Nonaktif (Menggunakan Hardware Fisik)");
+    updateDeviceUI({ status: isSim ? 'SIMULATED' : 'DISCONNECTED' });
   };
 
-  /* Navigasi langsung ke log aktivitas */
-  window.viewDeviceLogs = () => {
-    window.closeModal('esp32-modal');
-    window.showPage('page-dash');
-    const logSection = $('feed-container');
-    if (logSection) logSection.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  /* Backward-compatible helper aliases untuk script lama */
-  window.pingEsp32 = window.pingCurrentDevice;
+  // Backward-compatible aliases
+  window.connectDevice = window.connectBluetooth;
+  window.disconnectCurrentDevice = window.disconnectBluetooth;
+  window.saveAndConnectDevice = window.connectBluetooth;
+  window.pingCurrentDevice = window.connectBluetooth;
   window.toggleEsp32Sim = window.toggleDeviceSim;
-  window.saveAndConnectEsp32 = window.saveAndConnectDevice;
+  window.pingEsp32 = window.connectBluetooth;
 
   window.changeSortingMode = async (newMode) => {
     showToast(`Mode diubah ke: ${newMode}`);
@@ -2694,7 +2219,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   };
 
   /* ================================================================== */
-  /*  PHASE 2: AUTO/MANUAL, MECHANISM MAPPING & TRANSACTION TELEMETRY   */
+  /*  OPERATING MODE: AUTO / MANUAL SORTING                             */
   /* ================================================================== */
   window.setOperatingMode = (mode) => {
     try {
@@ -2747,40 +2272,6 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     }
   };
 
-  window.handleManualDeviceChange = async (devType) => {
-    const connSelect = $('man-conn-select');
-    if (devType === 'MICROBIT') {
-      if (connSelect) {
-        connSelect.value = 'BLE';
-        const optW = connSelect.querySelector('option[value="WIFI"]');
-        if (optW) optW.disabled = true;
-      }
-    } else {
-      if (connSelect) {
-        const optW = connSelect.querySelector('option[value="WIFI"]');
-        if (optW) optW.disabled = false;
-      }
-    }
-    const connType = connSelect ? connSelect.value : 'WIFI';
-    try {
-      await window.deviceManager.switchDevice(devType, connType);
-      showToast(`Target manual diubah ke ${devType} (${connType})`);
-    } catch (e) {
-      showToast("Error target perangkat: " + e.message);
-    }
-  };
-
-  window.handleManualConnectionChange = async (connType) => {
-    const devSelect = $('man-device-select');
-    const devType = devSelect ? devSelect.value : 'ESP32';
-    try {
-      await window.deviceManager.switchDevice(devType, connType);
-      showToast(`Koneksi manual diubah ke ${connType}`);
-    } catch (e) {
-      showToast("Error metode koneksi: " + e.message);
-    }
-  };
-
   window.sendManualSortCommand = async () => {
     const color = $('man-color-select')?.value || 'merah';
     const mechanism = $('man-mech-select')?.value || 'servo';
@@ -2817,27 +2308,11 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     }
   };
 
-  window.saveLegacyMapping = () => {
-    const merah = $('map-color-merah')?.value || 'servo';
-    const kuning = $('map-color-kuning')?.value || 'servo';
-    const biru = $('map-color-biru')?.value || 'arm';
-
-    window.deviceManager.setLegacyMechanismMap({ merah, kuning, biru });
-    window.closeModal('legacy-mapping-modal');
-    showToast("Pemetaan kelas warisan berhasil disimpan!");
-    logActivity("fas fa-map-location-dot", "background:rgba(59,130,246,.15);color:#3b82f6", "Mapping Updated", `Merah:${merah}, Kuning:${kuning}, Biru:${biru}`);
-  };
-
   function updateTransactionTelemetryUI(tx) {
     if (!tx) return;
     const title = $('tx-live-title');
     const badge = $('tx-live-badge');
     const detail = $('tx-live-detail');
-    const stageMech = $('tx-stage-mech');
-    const stageSort = $('tx-stage-sort');
-    const stageVerif = $('tx-stage-verif');
-
-    // Manual Panel Pills
     const manTx = $('man-tx-pill');
     const manAck = $('man-ack-pill');
     const manVerif = $('man-verif-pill');
@@ -2852,51 +2327,12 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     }
 
     if (detail) {
-      detail.innerText = `Kelas: ${tx.detectedClass || tx.color} · Mode: ${tx.mechanism || tx.mode} · Durasi: ${tx.durationMs || 0}ms · Kategori: ${tx.statusCategory || 'unknown'}`;
-    }
-
-    if (stageMech) {
-      if (tx.mechanismAck) {
-        stageMech.className = 'pill green';
-        stageMech.innerText = `1. Mekanisme: Siap (${tx.mechanism || 'OK'})`;
-      } else if (tx.state === 'AWAITING_MECHANISM_ACK') {
-        stageMech.className = 'pill yellow animate-pulse';
-        stageMech.innerText = '1. Mekanisme: Menunggu ACK...';
-      } else {
-        stageMech.className = 'pill gray';
-        stageMech.innerText = '1. Mekanisme: Siap';
-      }
-    }
-
-    if (stageSort) {
-      if (tx.classAck) {
-        stageSort.className = 'pill green';
-        stageSort.innerText = `2. Kelas: Selesai (${tx.color || 'OK'})`;
-      } else if (tx.state === 'SORTING' || tx.state === 'AWAITING_CLASS_ACK') {
-        stageSort.className = 'pill yellow animate-pulse';
-        stageSort.innerText = '2. Kelas: Menyortir...';
-      } else {
-        stageSort.className = 'pill gray';
-        stageSort.innerText = '2. Kelas: Siap';
-      }
-    }
-
-    if (stageVerif) {
-      if (tx.verified) {
-        stageVerif.className = 'pill green';
-        stageVerif.innerText = '3. Sensor: Terverifikasi Fisik';
-      } else if (tx.state === 'COMPLETED') {
-        stageVerif.className = 'pill blue';
-        stageVerif.innerText = '3. Sensor: Selesai (Belum Terverifikasi Fisik)';
-      } else {
-        stageVerif.className = 'pill gray';
-        stageVerif.innerText = '3. Sensor: Belum Terverifikasi Fisik';
-      }
+      detail.innerText = `Kelas: ${tx.detectedClass || tx.color} · Mode: ${tx.mechanism || tx.mode} · Durasi: ${tx.durationMs || 0}ms`;
     }
 
     if (manTx) manTx.innerText = `TX: ${tx.id || 'IDLE'}`;
-    if (manAck) manAck.innerText = tx.mechanismAck ? `ACK: READY (${tx.mechanism})` : (tx.state === 'AWAITING_MECHANISM_ACK' ? 'ACK: MENUNGGU...' : 'ACK: —');
-    if (manVerif) manVerif.innerText = tx.verified ? 'VERIFIKASI: VALID SENSOR' : 'VERIFIKASI: BELUM TERVERIFIKASI FISIK';
+    if (manAck) manAck.innerText = tx.mechanismAck ? `ACK: READY (${tx.mechanism})` : 'ACK: OK';
+    if (manVerif) manVerif.innerText = tx.verified ? 'VERIFIKASI: VALID SENSOR' : 'STATUS: SELESAI';
   }
 
   /* ================================================================== */
@@ -5092,22 +4528,22 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       ', aturanAktif=' + loadRules().filter(r => r.enabled).length + errCtx + '.';
   }
   /* ============================================================
-     Zero-LLM Architecture: Menggantikan panggilan LLM eksternal
-     dengan SmartDataAssistant deterministik berbasis aturan & data nyata.
+     R-AI Assistant: Pengetahuan lokal deterministik berbasis aturan & data nyata.
      ============================================================ */
   async function askRai(q) {
-    if (window.smartDataAssistant) {
-      const dataContext = {
-        smart_factory: state.dbData ? (state.dbData.smart_factory || state.dbData) : null,
-        excelLogs: state.excelLogs,
-        history: state.feed,
-        esp32Status: window.esp32Client ? window.esp32Client.getStatus() : null,
-        cameraStatus: { active: Boolean(state.aiReady && !state.isPaused), fps: state.fps || 30 }
-      };
-      const res = window.smartDataAssistant.processQuery(q, dataContext);
-      return { text: res.answer, actions: [] };
+    const s = getSummary();
+    const dataContext = {
+      kuning: s.kuning || 0,
+      biru: s.biru || 0,
+      merah: s.merah || 0,
+      gagal: s.gagal || 0,
+      total: s.total || 0
+    };
+    if (typeof window.raiKnowledgeReply === 'function') {
+      const reply = window.raiKnowledgeReply(q, dataContext, state.lang || 'id');
+      if (reply) return { text: reply, actions: [] };
     }
-    return { text: 'Smart Data Assistant siap melayani.', actions: [] };
+    return { text: jSummaryText(), actions: [] };
   }
   function runRaiActions(actions) {
     (actions || []).forEach(x => {
@@ -5394,13 +4830,13 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         if (isArmCmd) {
           window.changeSortingMode('Arm');
           jarvisSay(JL('Mode operasional berhasil diubah ke Mode Arm.', 'Operating mode changed to Arm mode.'), true, 'Sistem');
-          renderJarvisChips(['Mode Servo', 'Error rate mode arm', 'Status ESP32']);
+          renderJarvisChips(['Mode Servo', 'Error rate mode arm', 'Status robot']);
           return;
         }
         if (isServoCmd) {
           window.changeSortingMode('Servo');
           jarvisSay(JL('Mode operasional berhasil diubah ke Mode Servo.', 'Operating mode changed to Servo mode.'), true, 'Sistem');
-          renderJarvisChips(['Mode Arm', 'Error rate mode servo', 'Status ESP32']);
+          renderJarvisChips(['Mode Arm', 'Error rate mode servo', 'Status robot']);
           return;
         }
         if (/^(jeda|pause|berhenti sementara|tunda)\s*$/i.test(raw.trim())) {
@@ -5422,36 +4858,20 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         }
       }
 
-      // 2. Evaluasi Mesin Analisis Data Pintar (Zero-LLM Smart Data Assistant)
-      if (window.smartDataAssistant) {
-        let esp32Status = null;
-        try {
-          if (window.esp32Client && typeof window.esp32Client.getStatus === 'function') {
-            esp32Status = window.esp32Client.getStatus();
-          } else if (window.esp32Client) {
-            esp32Status = {
-              online: Boolean(window.esp32Client.simulationMode),
-              state: window.esp32Client.connectionStatus || 'OFFLINE',
-              host: window.esp32Client.host || 'http://192.168.4.1'
-            };
-          }
-        } catch (e) { esp32Status = null; }
-
-        const dataContext = {
-          smart_factory: state.dbData ? (state.dbData.smart_factory || state.dbData) : null,
-          excelLogs: state.excelLogs,
-          history: state.feed,
-          esp32Status: esp32Status,
-          cameraStatus: { active: Boolean(state.aiReady && !state.isPaused), fps: state.fps || 30 }
-        };
-
-        const result = window.smartDataAssistant.processQuery(raw, dataContext);
-        if (result && result.intent !== 'UNKNOWN') {
-          const fullMsg = result.answer + (result.basis ? `\n\n_${result.basis}_` : '');
-          jarvisSay(fullMsg, true, 'Smart Data Assistant');
-          if (result.suggestions && result.suggestions.length > 0) {
-            renderJarvisChips(result.suggestions);
-          }
+      // 2. Evaluasi Mesin Pengetahuan R-AI (rai-knowledge.js)
+      const s = getSummary();
+      const d = {
+        kuning: s.kuning || 0,
+        biru: s.biru || 0,
+        merah: s.merah || 0,
+        gagal: s.gagal || 0,
+        total: s.total || 0
+      };
+      if (typeof window.raiKnowledgeReply === 'function') {
+        const reply = window.raiKnowledgeReply(raw, d, state.lang || 'id');
+        if (reply) {
+          jarvisSay(reply, true, 'R-AI');
+          renderJarvisChips(['Total sortir?', 'Warna terbanyak', 'Status robot']);
           return;
         }
       }
@@ -5461,19 +4881,11 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       try { handled = await processCommand(raw); } catch (e) { handled = false; }
       if (handled) return;
 
-      // 4. Default Fallback Asisten Data (menampilkan opsi bantuan domain)
-      if (window.smartDataAssistant) {
-        const fallback = window.smartDataAssistant.processQuery(raw);
-        jarvisSay(fallback.answer, true, 'Smart Data Assistant');
-        if (fallback.suggestions) renderJarvisChips(fallback.suggestions);
-        return;
-      }
-
       jarvisSay(localOfflineReply());
     } catch (err) {
       console.error('jarvisSend caught error:', err);
-      jarvisSay('Terjadi kendala saat memproses pertanyaan. Silakan coba pertanyaan data sortir, error, atau status ESP32.', true, 'Smart Data Assistant');
-      renderJarvisChips(['Total sortir?', 'Warna terbanyak', 'Status ESP32']);
+      jarvisSay('Terjadi kendala saat memproses pertanyaan. Silakan coba pertanyaan data sortir, error, atau status robot.', true, 'R-AI');
+      renderJarvisChips(['Total sortir?', 'Warna terbanyak', 'Status robot']);
     }
   };
 

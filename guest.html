@@ -26,9 +26,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
-<script src="assets/js/esp32-client.js?v=2.6.0"></script>
 <script src="assets/js/device-manager.js?v=2.6.0"></script>
-<script src="assets/js/smart-data-assistant.js?v=2.6.0"></script>
 
 <style>
 :root{
@@ -700,12 +698,9 @@ const state = {
 };
 const $ = (id) => document.getElementById(id);
 
-// Unified Device Manager & Client Proxy
+// Unified Device Manager
 if (typeof DeviceConnectionManager !== 'undefined') {
   window.deviceManager = new DeviceConnectionManager();
-  window.esp32Client = window.deviceManager.createLegacyEsp32ClientProxy();
-} else if (typeof Esp32Client !== 'undefined') {
-  window.esp32Client = new Esp32Client();
 }
 
 const I18N = {
@@ -1878,22 +1873,6 @@ window.jarvisSend = async () => {
   if (has('ubah', 'ganti', 'reset', 'force', 'missort', 'jeda', 'pause') && (has('mode', 'arm', 'servo', 'data', 'timeout', 'sistem'))) {
     jarvisSay(GUEST_LOCKED(), true, 'Guest');
     return;
-  }
-
-  // Gunakan Smart Data Assistant
-  if (window.smartDataAssistant) {
-    const dataContext = {
-      smart_factory: state.dbData ? (state.dbData.smart_factory || state.dbData) : null,
-      excelLogs: state.exportLogs,
-      esp32Status: window.esp32Client ? window.esp32Client.getStatus() : null,
-      cameraStatus: { active: true, fps: 30 }
-    };
-    const result = window.smartDataAssistant.processQuery(raw, dataContext);
-    if (result && result.intent !== 'UNKNOWN') {
-      const fullMsg = result.answer + (result.basis ? `\n\n_${result.basis}_` : '');
-      jarvisSay(fullMsg, true, 'Smart Data Assistant');
-      return;
-    }
   }
 
   let reply = null;

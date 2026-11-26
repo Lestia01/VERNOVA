@@ -1,12 +1,15 @@
 /**
- * VERNOVA — Modular Multi-Device & Dual-Connection Manager
- * Mendukung mikrokontroler ESP32 DevKit V1 (Wi-Fi REST & BLE UART)
- * dan BBC micro:bit (MakeCode BLE UART Service).
+ * ==============================================================================
+ * VERNOVA / R-LAB — Micro:bit Robot Device Manager
+ * Arsitektur Sederhana, Stabil & Modular untuk Komunikasi BBC micro:bit
  * 
- * Memiliki layer adapter terpadu, pencegahan duplikasi perintah (debounce),
- * deteksi kompatibilitas Web Bluetooth API, dan mode simulasi terintegrasi.
- * 
- * Kompatibel dengan Browser (ES6+) dan Node.js (Automated Unit Testing).
+ * Mendukung:
+ * 1. Web Bluetooth API (Nordic UART Service: 6e400001-b5a3-f393-e0a9-e50e24dcca9e)
+ * 2. Transmisi Perintah Sortir Warna (kuning, biru, merah) dan Mode Aktuator (servo, arm)
+ * 3. Penerimaan Notifikasi Telemetri / Status dari micro:bit
+ * 4. Mode Simulasi Virtual (Offline / Fallback tanpa hardware fisik)
+ * 5. Debounce & Perlindungan Pengiriman Duplikat
+ * ==============================================================================
  */
 
 (function (root, factory) {
@@ -14,37 +17,28 @@
     module.exports = factory();
   } else {
     const mod = factory();
-    root.DeviceConnectionManager = mod.DeviceConnectionManager;
-    root.BaseDeviceAdapter = mod.BaseDeviceAdapter;
-    root.ESP32WiFiAdapter = mod.ESP32WiFiAdapter;
-    root.ESP32BLEAdapter = mod.ESP32BLEAdapter;
-    root.MicrobitBLEAdapter = mod.MicrobitBLEAdapter;
     root.DEVICE_TYPES = mod.DEVICE_TYPES;
     root.CONNECTION_TYPES = mod.CONNECTION_TYPES;
     root.CONNECTION_STATES = mod.CONNECTION_STATES;
+    root.VALID_COLORS = mod.VALID_COLORS;
+    root.VALID_MODES = mod.VALID_MODES;
     root.OPERATING_MODES = mod.OPERATING_MODES;
-    root.TRANSACTION_STATES = mod.TRANSACTION_STATES;
-    root.STATUS_CATEGORIES = mod.STATUS_CATEGORIES;
-    root.MECHANISM_TYPES = mod.MECHANISM_TYPES;
-    root.CANONICAL_CLASSES = mod.CANONICAL_CLASSES;
-    root.CLASS_REGISTRY = mod.CLASS_REGISTRY;
-    root.resolveClassAndMechanism = mod.resolveClassAndMechanism;
-    root.classifyTransaction = mod.classifyTransaction;
+    root.NORDIC_UART_SERVICE_UUID = mod.NORDIC_UART_SERVICE_UUID;
+    root.MicrobitBLEAdapter = mod.MicrobitBLEAdapter;
+    root.DeviceConnectionManager = mod.DeviceConnectionManager;
     root.aggregateSortingDistribution = mod.aggregateSortingDistribution;
   }
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
   // =========================================================================
-  // KONSTANTA SISTEM & UUID BLUETOOTH
+  // 1. KONSTANTA & PROTOKOL NORDIC UART BBC MICRO:BIT
   // =========================================================================
   const DEVICE_TYPES = {
-    ESP32: 'ESP32',
     MICROBIT: 'MICROBIT'
   };
 
   const CONNECTION_TYPES = {
-    WIFI: 'WIFI',
     BLE: 'BLE'
   };
 
@@ -52,9 +46,10 @@
     DISCONNECTED: 'DISCONNECTED',
     CONNECTING: 'CONNECTING',
     CONNECTED: 'CONNECTED',
+    READY: 'READY',
     BUSY: 'BUSY',
-    SIMULATED: 'SIMULATED',
-    ERROR: 'ERROR'
+    ERROR: 'ERROR',
+    SIMULATED: 'SIMULATED'
   };
 
   const OPERATING_MODES = {
@@ -62,1445 +57,76 @@
     MANUAL: 'MANUAL'
   };
 
-  const TRANSACTION_STATES = {
-    IDLE: 'IDLE',
-    COMMAND_QUEUED: 'COMMAND_QUEUED',
-    AWAITING_MECHANISM_ACK: 'AWAITING_MECHANISM_ACK',
-    AWAITING_CLASS_ACK: 'AWAITING_CLASS_ACK',
-    SORTING: 'SORTING',
-    VERIFYING: 'VERIFYING',
-    COMPLETED: 'COMPLETED',
-    FAILED: 'FAILED',
-    TIMEOUT: 'TIMEOUT',
-    CANCELLED: 'CANCELLED',
-    UNKNOWN: 'UNKNOWN'
-  };
+  const VALID_COLORS = ['kuning', 'biru', 'merah'];
+  const VALID_MODES = ['Servo', 'Arm'];
 
-  const STATUS_CATEGORIES = {
-    DETECTED: 'detected',
-    COMMAND_SENT: 'command_sent',
-    COMMAND_ACKNOWLEDGED: 'command_acknowledged',
-    SORTING: 'sorting',
-    COMPLETED_UNVERIFIED: 'completed_unverified',
-    VERIFIED: 'verified',
-    FAILED: 'failed',
-    TIMEOUT: 'timeout',
-    UNKNOWN: 'unknown'
-  };
+  // UUID Standar Nordic Semiconductor UART Service (BBC micro:bit MakeCode BLE)
+  const NORDIC_UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+  const NORDIC_UART_TX_CHARACTERISTIC_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // micro:bit -> Web (Notify)
+  const NORDIC_UART_RX_CHARACTERISTIC_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Web -> micro:bit (Write)
 
-  const MECHANISM_TYPES = {
-    SERVO: 'servo',
-    ARM: 'arm'
-  };
-
-  const CANONICAL_CLASSES = {
-    MERAH_ARM: 'merah_arm',
-    KUNING_ARM: 'kuning_arm',
-    BIRU_ARM: 'biru_arm',
-    MERAH_SERVO: 'merah_servo',
-    KUNING_SERVO: 'kuning_servo',
-    BIRU_SERVO: 'biru_servo',
-    MERAH: 'merah',
-    KUNING: 'kuning',
-    BIRU: 'biru'
-  };
-
-  const CLASS_REGISTRY = {
-    'merah_arm':    { color: 'merah',  mechanism: 'arm',   label: 'Merah (Lengan Robot)' },
-    'kuning_arm':   { color: 'kuning', mechanism: 'arm',   label: 'Kuning (Lengan Robot)' },
-    'biru_arm':     { color: 'biru',   mechanism: 'arm',   label: 'Biru (Lengan Robot)' },
-    'merah_servo':  { color: 'merah',  mechanism: 'servo', label: 'Merah (Servo Flap)' },
-    'kuning_servo': { color: 'kuning', mechanism: 'servo', label: 'Kuning (Servo Flap)' },
-    'biru_servo':   { color: 'biru',   mechanism: 'servo', label: 'Biru (Servo Flap)' }
-  };
-
-  /**
-   * Pemetaan kelas deteksi AI ke warna dan mekanisme fisik secara deterministik.
-   * Mendukung kelas berorientasi mekanisme (6 kelas) dan kelas warisan (3 warna).
-   */
-  function resolveClassAndMechanism(rawClass, legacyMap = {}, fallbackMechanism = null) {
-    const raw = String(rawClass || '').toLowerCase().trim();
-    if (!raw) {
-      return { valid: false, error: 'EMPTY_CLASS', reason: 'Nama kelas tidak boleh kosong.' };
-    }
-
-    // 1. Pencocokan langsung pada registry 6 kelas kanonik
-    if (CLASS_REGISTRY[raw]) {
-      const entry = CLASS_REGISTRY[raw];
-      return {
-        valid: true,
-        class: raw,
-        color: entry.color,
-        mechanism: entry.mechanism,
-        label: entry.label,
-        isMechanismAware: true
-      };
-    }
-
-    // 2. Ekstraksi warna
-    let color = null;
-    if (raw.includes('kuning') || raw.includes('yellow')) color = 'kuning';
-    else if (raw.includes('biru') || raw.includes('blue')) color = 'biru';
-    else if (raw.includes('merah') || raw.includes('red')) color = 'merah';
-
-    if (!color) {
-      return { valid: false, error: 'INVALID_COLOR', reason: `Warna tidak dikenali dari kelas "${rawClass}".` };
-    }
-
-    // 3. Ekstraksi mekanisme jika tertulis pada string (misal: "red_arm", "biru-servo")
-    let embeddedMech = null;
-    if (raw.includes('arm')) embeddedMech = 'arm';
-    else if (raw.includes('servo')) embeddedMech = 'servo';
-
-    if (embeddedMech) {
-      const canonicalKey = `${color}_${embeddedMech}`;
-      return {
-        valid: true,
-        class: canonicalKey,
-        color: color,
-        mechanism: embeddedMech,
-        label: CLASS_REGISTRY[canonicalKey]?.label || `${color} (${embeddedMech})`,
-        isMechanismAware: true
-      };
-    }
-
-    // 4. Model warisan (3 warna): utamakan mekanisme eksplisit yang dipassing perintah (misal manual), atau konfigurasi pemetaan
-    const explicitMech = (fallbackMechanism && (String(fallbackMechanism).toLowerCase().trim() === 'arm' || String(fallbackMechanism).toLowerCase().trim() === 'servo'))
-      ? String(fallbackMechanism).toLowerCase().trim()
-      : null;
-    const mappedMech = (legacyMap && legacyMap[color]) ? String(legacyMap[color]).toLowerCase().trim() : null;
-    const finalMech = explicitMech || mappedMech;
-
-    if (!finalMech || (finalMech !== 'arm' && finalMech !== 'servo')) {
-      return {
-        valid: false,
-        error: 'MECHANISM_UNDEFINED',
-        color: color,
-        reason: `Mekanisme untuk kelas warisan "${color}" belum dikonfigurasi. Silakan tentukan mekanisme target.`
-      };
-    }
-
-    const canonicalKey = `${color}_${finalMech}`;
-    return {
-      valid: true,
-      class: canonicalKey,
-      color: color,
-      mechanism: finalMech,
-      label: CLASS_REGISTRY[canonicalKey]?.label || `${color} (${finalMech})`,
-      isMechanismAware: false,
-      mappedFromLegacy: true
-    };
+  function isWebBluetoothSupported() {
+    return typeof navigator !== 'undefined' && Boolean(navigator.bluetooth);
   }
 
-  /**
-   * Mengklasifikasikan transaksi ke dalam kategori status fisik:
-   * 1. 'VERIFIED': Perintah dieksekusi DAN sensor fisik mengonfirmasi objek masuk wadah.
-   * 2. 'COMPLETED_UNVERIFIED': Mikrokontroler selesai bergerak, namun TIDAK ada bukti sensor fisik.
-   * 3. 'FAILED': Terjadi kegagalan komunikasi, timeout, atau eksekusi error.
-   */
-  function classifyTransaction(entry) {
-    if (!entry || typeof entry !== 'object') return null;
-
-    // 1. Cek bukti kegagalan (FAILED / ERROR)
-    const isErr = Boolean(
-      entry.sortResult === 'error' ||
-      entry.executionStatus === 'failed' ||
-      entry.statusCategory === 'failed' ||
-      entry.statusCategory === 'timeout' ||
-      entry.commandStatus === 'watchdog_timeout' ||
-      entry.commandStatus === 'force_timeout' ||
-      (typeof entry.status === 'string' && (
-        entry.status.toLowerCase().includes('timeout') ||
-        entry.status.toLowerCase().includes('error') ||
-        entry.status.toLowerCase().includes('gagal')
-      )) ||
-      entry.errorCode
-    );
-
-    const rawColor = entry.warna || entry.detectedColor || entry.color || '';
-    const rawMech = entry.mechanism || entry.mode || '';
-
-    // Normalisasi warna
-    let color = null;
-    const c = String(rawColor).toLowerCase().trim();
-    if (c.includes('kuning') || c.includes('yellow')) color = 'kuning';
-    else if (c.includes('biru') || c.includes('blue')) color = 'biru';
-    else if (c.includes('merah') || c.includes('red')) color = 'merah';
-
-    // Normalisasi mekanisme
-    let mechanism = 'servo';
-    const m = String(rawMech).toLowerCase().trim();
-    if (m.includes('arm')) mechanism = 'arm';
-    else if (m.includes('servo')) mechanism = 'servo';
-
-    const transactionId = entry.transactionId || entry.commandId || entry.runId || null;
-
-    if (isErr) {
-      return {
-        status: 'FAILED',
-        color,
-        mechanism,
-        transactionId,
-        raw: entry
-      };
-    }
-
-    // 2. Cek apakah ini transaksi VERIFIED (sensor fisik konfirmasi)
-    // Syarat VERIFIED:
-    // - verified === true, ATAU
-    // - sensorVerified === true, ATAU
-    // - verificationStatus === 'verified', ATAU
-    // - statusCategory === 'verified', ATAU
-    // - status memuat 'terverifikasi' DAN TIDAK memuat 'belum'
-    const isPhysicallyVerified = Boolean(
-      entry.verified === true ||
-      entry.sensorVerified === true ||
-      entry.verificationStatus === 'verified' ||
-      entry.statusCategory === 'verified' ||
-      (typeof entry.status === 'string' &&
-        entry.status.toLowerCase().includes('terverifikasi') &&
-        !entry.status.toLowerCase().includes('belum'))
-    );
-
-    if (isPhysicallyVerified) {
-      return {
-        status: 'VERIFIED',
-        color,
-        mechanism,
-        transactionId,
-        raw: entry
-      };
-    }
-
-    // 3. Gerakan selesai tetapi tanpa konfirmasi sensor fisik
-    return {
-      status: 'COMPLETED_UNVERIFIED',
-      color,
-      mechanism,
-      transactionId,
-      raw: entry
-    };
-  }
-
-  /**
-   * Agregasi Distribusi Penyortiran Khusus Transaksi VERIFIED:
-   * - Hanya transaksi berstatus 'VERIFIED' yang menambah distribusi 6-kategori (Warna - Mekanisme)
-   * - Transaksi 'COMPLETED_UNVERIFIED' tidak menambah distribusi atau keberhasilan
-   * - Transaksi 'FAILED' tidak menambah distribusi atau keberhasilan
-   * - Deduplikasi berdasarkan transaction ID unik untuk mencegah double counting
-   */
+  // =========================================================================
+  // 2. AGREGASI STATISTIK SORTIR
+  // =========================================================================
   function aggregateSortingDistribution(entries = []) {
-    const seenTx = new Set();
+    const list = Array.isArray(entries) ? entries : Object.values(entries || {});
     const summary = {
-      // 6 Kategori Distribusi Fisik Terverifikasi (Warna — Mekanisme)
-      merah_arm: 0,
-      kuning_arm: 0,
-      biru_arm: 0,
-      merah_servo: 0,
-      kuning_servo: 0,
-      biru_servo: 0,
-
-      // Subtotal Warna Terverifikasi
-      merah: 0,
       kuning: 0,
       biru: 0,
-
-      // Subtotal Mekanisme Terverifikasi
-      armTotal: 0,
-      servoTotal: 0,
-
-      // Total Sukses Terverifikasi Fisik
-      totalVerified: 0,
-      total: 0, // Alias kompatibilitas dengan UI stat-total
-
-      // Pelacakan Transaksi Belum Terverifikasi (COMPLETED_UNVERIFIED)
-      unverifiedTotal: 0,
-      unverified: {
-        merah: 0,
-        kuning: 0,
-        biru: 0,
-        arm: 0,
-        servo: 0
-      },
-
-      // Total Error / Gagal
+      merah: 0,
+      total: 0,
       gagal: 0,
-
-      // Total Percobaan dengan Hasil Final Relevan: VERIFIED + COMPLETED_UNVERIFIED + FAILED
-      totalAttempts: 0,
-
-      // Persentase Keberhasilan Terverifikasi: (totalVerified / totalAttempts) * 100%
-      verifiedSuccessRate: 0.0,
+      successRate: 0.0,
       successRateString: '0.0%'
     };
 
-    const list = Array.isArray(entries) ? entries : Object.values(entries || {});
-
-    list.forEach((entry, idx) => {
+    list.forEach(entry => {
       if (!entry) return;
-      const classified = classifyTransaction(entry);
-      if (!classified) return;
+      const status = String(entry.status || '').toUpperCase();
+      const color = String(entry.warna || entry.color || '').toLowerCase();
 
-      // Deduplikasi transaksi unik menggunakan transaction ID atau key deterministik
-      const txId = classified.transactionId || `tx_${idx}_${entry.timestamp || Date.now()}`;
-      if (seenTx.has(txId)) return;
-      seenTx.add(txId);
-
-      if (classified.status === 'VERIFIED') {
-        const col = classified.color;
-        const mech = classified.mechanism;
-        if (col && (mech === 'arm' || mech === 'servo')) {
-          const key = `${col}_${mech}`;
-          if (typeof summary[key] === 'number') {
-            summary[key]++;
-          }
-          if (typeof summary[col] === 'number') {
-            summary[col]++;
-          }
-          if (mech === 'arm') summary.armTotal++;
-          else summary.servoTotal++;
-
-          summary.totalVerified++;
-          summary.total++;
+      if (status === 'COMPLETED' || status === 'CONFIRMED' || status === 'SUCCESS' || status === 'VERIFIED') {
+        if (summary[color] !== undefined) {
+          summary[color]++;
         }
-        summary.totalAttempts++;
-      } else if (classified.status === 'COMPLETED_UNVERIFIED') {
-        summary.unverifiedTotal++;
-        const col = classified.color;
-        const mech = classified.mechanism;
-        if (col && summary.unverified[col] !== undefined) {
-          summary.unverified[col]++;
-        }
-        if (mech && summary.unverified[mech] !== undefined) {
-          summary.unverified[mech]++;
-        }
-        summary.totalAttempts++;
-      } else if (classified.status === 'FAILED') {
+        summary.total++;
+      } else if (status === 'FAILED' || status === 'ERROR' || status === 'TIMEOUT' || status === 'MISSORT') {
         summary.gagal++;
-        summary.totalAttempts++;
       }
     });
 
-    const relevantAttempts = summary.totalVerified + summary.unverifiedTotal + summary.gagal;
-    summary.totalAttempts = relevantAttempts;
-    summary.verifiedSuccessRate = relevantAttempts > 0
-      ? Number(((summary.totalVerified / relevantAttempts) * 100).toFixed(1))
-      : 0.0;
-    summary.successRateString = `${summary.verifiedSuccessRate.toFixed(1)}%`;
+    const attempts = summary.total + summary.gagal;
+    if (attempts > 0) {
+      summary.successRate = Number(((summary.total / attempts) * 100).toFixed(1));
+      summary.successRateString = `${summary.successRate}%`;
+    }
 
     return summary;
   }
 
-  // Nordic UART Service (Standar BLE untuk micro:bit MakeCode & ESP32 BLE UART)
-  const NORDIC_UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-  const NORDIC_UART_RX_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // Web menulis ke Perangkat
-  const NORDIC_UART_TX_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Perangkat mengirim notifikasi ke Web
-
-  const VALID_COLORS = ['kuning', 'biru', 'merah'];
-  const VALID_MODES = ['Servo', 'Arm'];
-
-  /**
-   * Helper: Periksa apakah Web Bluetooth didukung di browser saat ini.
-   */
-  function isWebBluetoothSupported() {
-    return typeof navigator !== 'undefined' && Boolean(navigator && navigator.bluetooth);
-  }
-
   // =========================================================================
-  // 1. BASE DEVICE ADAPTER (Unified Interface)
+  // 3. ADAPTER BLE BBC MICRO:BIT (MakeCode Bluetooth UART)
   // =========================================================================
-  class BaseDeviceAdapter {
-    constructor(deviceType, connectionType, config = {}) {
-      this.deviceType = deviceType;
-      this.connectionType = connectionType;
-      this.config = Object.assign({}, config);
-      this.status = config.simulationMode ? CONNECTION_STATES.SIMULATED : CONNECTION_STATES.DISCONNECTED;
+  class MicrobitBLEAdapter {
+    constructor(config = {}) {
+      this.deviceType = DEVICE_TYPES.MICROBIT;
+      this.connectionType = CONNECTION_TYPES.BLE;
       this.simulationMode = Boolean(config.simulationMode);
+      this.targetDeviceName = config.deviceName || 'BBC micro:bit';
+      this.device = null;
+      this.server = null;
+      this.rxCharacteristic = null;
+      this.txCharacteristic = null;
+      this.status = this.simulationMode ? CONNECTION_STATES.SIMULATED : CONNECTION_STATES.DISCONNECTED;
       this.lastError = null;
       this.lastAck = null;
       this.lastTelemetry = null;
       this._listeners = new Set();
-    }
 
-    onStatusChange(fn) {
-      if (typeof fn === 'function') this._listeners.add(fn);
-      return () => this._listeners.delete(fn);
-    }
-
-    _notify(state, detail = null, extra = {}) {
-      this.status = state;
-      const payload = Object.assign({
-        deviceType: this.deviceType,
-        connectionType: this.connectionType,
-        status: this.status,
-        simulation: this.simulationMode,
-        detail,
-        telemetry: this.lastTelemetry,
-        timestamp: new Date().toISOString()
-      }, extra);
-      this._listeners.forEach(fn => {
-        try { fn(payload); } catch (e) { console.error(`[${this.deviceType}Adapter] Listener error:`, e); }
-      });
-    }
-
-    setSimulation(enabled) {
-      this.simulationMode = Boolean(enabled);
-      if (this.simulationMode) {
-        this.status = CONNECTION_STATES.SIMULATED;
-        this._notify(CONNECTION_STATES.SIMULATED, 'Mode simulasi aktif.');
-      } else {
-        this.status = CONNECTION_STATES.DISCONNECTED;
-        this._notify(CONNECTION_STATES.DISCONNECTED, 'Mode simulasi dinonaktifkan.');
-      }
-      return this;
-    }
-
-    isSimulated() {
-      return this.simulationMode;
-    }
-
-    getStatus() {
-      const isOnline = (
-        this.simulationMode ||
-        this.status === CONNECTION_STATES.CONNECTED ||
-        this.status === CONNECTION_STATES.READY ||
-        this.status === CONNECTION_STATES.BUSY ||
-        this.status === CONNECTION_STATES.SIMULATED
-      );
-      return {
-        online: isOnline,
-        state: this.status,
-        deviceType: this.deviceType,
-        connectionType: this.connectionType,
-        isSimulated: this.simulationMode,
-        lastError: this.lastError,
-        telemetry: this.lastTelemetry,
-        lastAck: this.lastAck
-      };
-    }
-
-    /* Abstract methods to be implemented by adapters */
-    async connect() { throw new Error('connect() harus diimplementasikan oleh subclass adapter.'); }
-    async disconnect() { throw new Error('disconnect() harus diimplementasikan oleh subclass adapter.'); }
-    async sendSortingCommand(params) { throw new Error('sendSortingCommand() harus diimplementasikan.'); }
-    async sendModeCommand(mode) { throw new Error('sendModeCommand() harus diimplementasikan.'); }
-    async setMechanism(mechanism, options = {}) { throw new Error('setMechanism() harus diimplementasikan.'); }
-    async sortObject(color, mechanism, options = {}) { throw new Error('sortObject() harus diimplementasikan.'); }
-    async sendEmergencyStop() { throw new Error('sendEmergencyStop() harus diimplementasikan.'); }
-    async sendTestPulse() { throw new Error('sendTestPulse() harus diimplementasikan.'); }
-
-    dispose() {
-      this._listeners.clear();
-    }
-  }
-
-  // =========================================================================
-  // 2. ESP32 WI-FI ADAPTER (HTTP REST API)
-  // =========================================================================
-  class ESP32WiFiAdapter extends BaseDeviceAdapter {
-    constructor(config = {}) {
-      super(DEVICE_TYPES.ESP32, CONNECTION_TYPES.WIFI, config);
-      this.host = this._sanitizeHost(config.host || 'http://192.168.4.1');
-      this.timeoutMs = Math.max(1000, Number(config.timeoutMs) || 5000);
-      if (this.simulationMode) {
-        this._initSimulatedTelemetry();
-      }
-    }
-
-    _sanitizeHost(host) {
-      let h = String(host || '').trim();
-      if (!h) return 'http://192.168.4.1';
-      if (!/^https?:\/\//i.test(h)) h = 'http://' + h;
-      return h.replace(/\/+$/, '');
-    }
-
-    _initSimulatedTelemetry() {
-      this.lastTelemetry = {
-        deviceId: 'VERNOVA-ESP32-SIMULATOR',
-        firmwareVersion: '2.1.0-sim',
-        state: 'READY',
-        wifiRssi: -42,
-        freeHeap: 218400,
-        uptimeSec: 360,
-        lastSeen: new Date().toISOString()
-      };
-    }
-
-    async _fetchWithTimeout(url, fetchOpts = {}) {
-      const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-      const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
-      const opts = {
-        ...fetchOpts,
-        signal: controller ? controller.signal : undefined,
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          ...(fetchOpts.headers || {})
-        }
-      };
-
-      try {
-        const resp = await fetch(url, opts);
-        if (timer) clearTimeout(timer);
-        return resp;
-      } catch (err) {
-        if (timer) clearTimeout(timer);
-        if (err.name === 'AbortError') {
-          throw new Error(`Timeout menghubungi ESP32 Wi-Fi setelah ${this.timeoutMs}ms`);
-        }
-        throw err;
-      }
-    }
-
-    async connect() {
-      if (this.simulationMode) {
-        this._initSimulatedTelemetry();
-        this._notify(CONNECTION_STATES.SIMULATED, 'Tersambung ke ESP32 Wi-Fi (Simulasi Virtual).');
-        return { ok: true, simulated: true, telemetry: this.lastTelemetry };
-      }
-
-      this._notify(CONNECTION_STATES.CONNECTING, `Menghubungi ${this.host}...`);
-      try {
-        const resp = await this._fetchWithTimeout(`${this.host}/api/status`, { method: 'GET' });
-        if (!resp.ok) throw new Error(`ESP32 merespons dengan HTTP ${resp.status}`);
-        const json = await resp.json();
-        this.lastTelemetry = {
-          deviceId: json.deviceId || 'ESP32-VERNOVA',
-          firmwareVersion: json.firmwareVersion || '2.1.0',
-          state: json.state || 'READY',
-          wifiRssi: Number(json.wifiRssi) || -60,
-          freeHeap: Number(json.freeHeap) || 0,
-          uptimeSec: Number(json.uptimeSec) || 0,
-          lastSeen: new Date().toISOString()
-        };
-        this.lastError = null;
-        this._notify(CONNECTION_STATES.CONNECTED, 'Koneksi ESP32 Wi-Fi aktif.');
-        return { ok: true, telemetry: this.lastTelemetry };
-      } catch (err) {
-        this.lastError = err.message;
-        this._notify(CONNECTION_STATES.ERROR, `Gagal konek Wi-Fi: ${err.message}`);
-        return { ok: false, error: err.message };
-      }
-    }
-
-    async disconnect() {
-      this._notify(CONNECTION_STATES.DISCONNECTED, 'Koneksi ESP32 Wi-Fi diputuskan.');
-      return { ok: true };
-    }
-
-    async sendSortingCommand(params = {}) {
-      const rawColor = String(params.color || params || '').toLowerCase().trim();
-      let color = null;
-      if (rawColor.includes('kuning') || rawColor.includes('yellow')) color = 'kuning';
-      else if (rawColor.includes('biru') || rawColor.includes('blue')) color = 'biru';
-      else if (rawColor.includes('merah') || rawColor.includes('red')) color = 'merah';
-
-      if (!VALID_COLORS.includes(color)) {
-        throw new Error(`Warna tidak valid: "${params.color}". Harus salah satu dari: ${VALID_COLORS.join(', ')}`);
-      }
-
-      const mode = params.mode && VALID_MODES.includes(params.mode) ? params.mode : 'Servo';
-      const commandId = params.commandId || `CMD_WIFI_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const startTime = Date.now();
-
-      if (this.simulationMode) {
-        this._notify(CONNECTION_STATES.BUSY, `[Simulasi] Menyortir warna ${color}`);
-        await new Promise(r => setTimeout(r, 250));
-        const durationMs = Date.now() - startTime;
-        const result = {
-          ok: true,
-          simulated: true,
-          commandId,
-          color,
-          mode,
-          status: 'COMPLETED',
-          executionStatus: 'simulated_esp32_wifi',
-          durationMs,
-          message: `Simulasi pemilahan ${color} sukses.`
-        };
-        this.lastAck = result;
-        this._notify(CONNECTION_STATES.SIMULATED, `[Simulasi] Sortir ${color} selesai`);
-        return result;
-      }
-
-      this._notify(CONNECTION_STATES.BUSY, `Mengirim sortir ${color} (${commandId})...`);
-      try {
-        const resp = await this._fetchWithTimeout(`${this.host}/api/sort`, {
-          method: 'POST',
-          body: JSON.stringify({
-            commandId,
-            color,
-            mode,
-            objectType: params.objectType || 'CYLINDER_CAP',
-            timestamp: new Date().toISOString()
-          })
-        });
-
-        if (!resp.ok) throw new Error(`ESP32 menolak sortir (HTTP ${resp.status})`);
-        const json = await resp.json();
-        const durationMs = Date.now() - startTime;
-        const result = {
-          ok: true,
-          commandId: json.commandId || commandId,
-          color,
-          mode,
-          status: json.status || 'COMMAND_RECEIVED',
-          executionStatus: json.executionStatus || 'confirmed_esp32_wifi',
-          durationMs,
-          rawResponse: json
-        };
-        this.lastAck = result;
-        this._notify(CONNECTION_STATES.CONNECTED, `Sortir ${color} sukses (${durationMs}ms)`);
-        return result;
-      } catch (err) {
-        const durationMs = Date.now() - startTime;
-        this.lastError = err.message;
-        this._notify(CONNECTION_STATES.ERROR, `Gagal kirim perintah: ${err.message}`);
-        return {
-          ok: false,
-          commandId,
-          color,
-          mode,
-          status: 'FAILED',
-          errorCode: 'ERR_ESP32_WIFI_DISCONNECTED',
-          durationMs,
-          error: err.message
-        };
-      }
-    }
-
-    async sendModeCommand(modeName) {
-      const mode = VALID_MODES.includes(modeName) ? modeName : 'Servo';
-      if (this.simulationMode) {
-        return { ok: true, simulated: true, mode, message: `Mode diubah ke ${mode}` };
-      }
-      try {
-        const resp = await this._fetchWithTimeout(`${this.host}/api/mode`, {
-          method: 'POST',
-          body: JSON.stringify({ mode, timestamp: new Date().toISOString() })
-        });
-        const json = await resp.json();
-        return { ok: true, mode, response: json };
-      } catch (err) {
-        return { ok: false, mode, error: err.message };
-      }
-    }
-
-    async setMechanism(mechanism, options = {}) {
-      const mode = String(mechanism || '').toLowerCase().trim() === 'arm' ? 'Arm' : 'Servo';
-      const txId = options.transactionId || `TX_WIFI_MECH_${Date.now()}`;
-      if (this.simulationMode) {
-        await new Promise(r => setTimeout(r, 60));
-        const res = {
-          ok: true,
-          simulated: true,
-          transactionId: txId,
-          mechanism: mode.toLowerCase(),
-          mode: mode,
-          status: 'READY',
-          ready: true,
-          message: `Mekanisme ${mode} siap (Simulasi Wi-Fi).`
-        };
-        this.lastAck = res;
-        return res;
-      }
-
-      try {
-        let resp;
-        try {
-          resp = await this._fetchWithTimeout(`${this.host}/api/mechanism`, {
-            method: 'POST',
-            body: JSON.stringify({ mechanism: mode.toLowerCase(), mode, transactionId: txId, timestamp: new Date().toISOString() })
-          });
-        } catch (e) {
-          resp = await this._fetchWithTimeout(`${this.host}/api/mode`, {
-            method: 'POST',
-            body: JSON.stringify({ mode, transactionId: txId, timestamp: new Date().toISOString() })
-          });
-        }
-
-        if (!resp.ok) throw new Error(`ESP32 menolak mekanisme ${mode} (HTTP ${resp.status})`);
-        const json = await resp.json();
-        const res = {
-          ok: true,
-          transactionId: json.transactionId || txId,
-          mechanism: mode.toLowerCase(),
-          mode: mode,
-          status: json.status || 'READY',
-          ready: json.ready !== false,
-          rawResponse: json
-        };
-        this.lastAck = res;
-        return res;
-      } catch (err) {
-        this.lastError = err.message;
-        throw new Error(`Gagal konfirmasi kesiapan mekanisme ${mode} via Wi-Fi: ${err.message}`);
-      }
-    }
-
-    async sortObject(color, mechanism, options = {}) {
-      const mode = String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo';
-      return await this.sendSortingCommand({
-        color,
-        mode,
-        canonicalClass: options.detectedClass || `${color}_${mode.toLowerCase()}`,
-        commandId: options.transactionId,
-        ...options
-      });
-    }
-
-    async sendEmergencyStop() {
-      if (this.simulationMode) {
-        this._notify(CONNECTION_STATES.SIMULATED, 'Emergency stop (Simulasi)');
-        return { ok: true, simulated: true, status: 'STOPPED' };
-      }
-      try {
-        const resp = await this._fetchWithTimeout(`${this.host}/api/stop`, {
-          method: 'POST',
-          body: JSON.stringify({ timestamp: new Date().toISOString() })
-        });
-        const json = await resp.json();
-        this._notify(CONNECTION_STATES.CONNECTED, 'Emergency stop dieksekusi.');
-        return { ok: true, response: json };
-      } catch (err) {
-        return { ok: false, error: err.message };
-      }
-    }
-
-    async sendTestPulse() {
-      // Uji koneksi cepat tanpa menggerakkan seluruh siklus sortir
-      return await this.connect();
-    }
-  }
-
-  // =========================================================================
-  // 3. ESP32 BLE ADAPTER (Bluetooth Low Energy GATT UART)
-  // =========================================================================
-  class ESP32BLEAdapter extends BaseDeviceAdapter {
-    constructor(config = {}) {
-      super(DEVICE_TYPES.ESP32, CONNECTION_TYPES.BLE, config);
-      this.device = null;
-      this.server = null;
-      this.rxCharacteristic = null;
-      this.txCharacteristic = null;
-      this.targetDeviceName = config.deviceName || 'VERNOVA-ESP32';
-      this.sensorState = {
-        state: 'IDLE',
-        objectPresent: false,
-        lastUpdated: null,
-        raw: '',
-        sensors: {
-          merah: { pin: 14, objectPresent: false, lastUpdated: null },
-          biru: { pin: 13, objectPresent: false, lastUpdated: null },
-          kuning: { pin: 35, objectPresent: false, lastUpdated: null },
-          arm: { pin: 34, objectPresent: false, lastUpdated: null }
-        }
-      };
-      this._sortWaiters = new Map();
-      this._mechanismWaiters = new Map();
-      this._activeSortWaiter = null;
-
-      if (this.simulationMode) {
-        this._initSimulatedTelemetry();
-      }
-    }
-
-    _initSimulatedTelemetry() {
-      this.lastTelemetry = {
-        deviceId: 'VERNOVA-ESP32-BLE-SIM',
-        firmwareVersion: '2.1.0-ble-sim',
-        state: 'READY',
-        rssi: -55,
-        protocol: 'BLE-GATT-UART',
-        lastSeen: new Date().toISOString()
-      };
-    }
-
-    isSupported() {
-      return isWebBluetoothSupported();
-    }
-
-    async connect() {
-      if (this.simulationMode) {
-        this._initSimulatedTelemetry();
-        this._notify(CONNECTION_STATES.SIMULATED, 'Tersambung ke ESP32 BLE (Simulasi Virtual).');
-        return { ok: true, simulated: true, telemetry: this.lastTelemetry };
-      }
-
-      if (!this.isSupported()) {
-        const errMsg = 'Web Bluetooth API tidak didukung di browser ini. Gunakan Google Chrome atau Microsoft Edge desktop melalui HTTPS atau localhost.';
-        this.lastError = errMsg;
-        this._notify(CONNECTION_STATES.ERROR, errMsg);
-        return { ok: false, error: errMsg, unsupported: true };
-      }
-
-      try {
-        this._notify(CONNECTION_STATES.CONNECTING, 'Memindai perangkat ESP32 BLE...');
-        
-        // Buka pemindai dialog Web Bluetooth
-        this.device = await navigator.bluetooth.requestDevice({
-          filters: [
-            { namePrefix: 'VERNOVA' },
-            { namePrefix: 'ESP32' },
-            { services: [NORDIC_UART_SERVICE_UUID] }
-          ],
-          optionalServices: [NORDIC_UART_SERVICE_UUID]
-        });
-
-        this.device.addEventListener('gattserverdisconnected', () => {
-          this._notify(CONNECTION_STATES.DISCONNECTED, 'Koneksi ESP32 BLE terputus.');
-        });
-
-        this._notify(CONNECTION_STATES.CONNECTING, `Menghubungkan ke ${this.device.name || 'ESP32 BLE'}...`);
-        this.server = await this.device.gatt.connect();
-
-        const service = await this.server.getPrimaryService(NORDIC_UART_SERVICE_UUID);
-        
-        // Ambil karakteristik RX (tulis dari Web ke ESP32) dan TX (notifikasi ke Web)
-        try {
-          this.rxCharacteristic = await service.getCharacteristic(NORDIC_UART_RX_UUID);
-        } catch (e) {
-          console.warn('Fallback mencari karakteristik write pada service:', e);
-          const chars = await service.getCharacteristics();
-          this.rxCharacteristic = chars.find(c => c.properties.write || c.properties.writeWithoutResponse);
-        }
-
-        try {
-          this.txCharacteristic = await service.getCharacteristic(NORDIC_UART_TX_UUID);
-          await this.txCharacteristic.startNotifications();
-          this.txCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
-            const val = new TextDecoder().decode(event.target.value);
-            this._handleIncomingData(val);
-          });
-        } catch (e) {
-          console.warn('TX Characteristic notification tidak tersedia:', e);
-        }
-
-        this.lastTelemetry = {
-          deviceId: this.device.name || 'ESP32-BLE',
-          firmwareVersion: '2.1.0-ble',
-          state: 'READY',
-          protocol: 'BLE-GATT-UART',
-          lastSeen: new Date().toISOString()
-        };
-
-        this._notify(CONNECTION_STATES.CONNECTED, `Terhubung ke ESP32 BLE (${this.device.name || 'Device'}).`);
-        return { ok: true, deviceName: this.device.name, telemetry: this.lastTelemetry };
-      } catch (err) {
-        this.lastError = err.message;
-        this._notify(CONNECTION_STATES.ERROR, `Gagal koneksi BLE: ${err.message}`);
-        return { ok: false, error: err.message };
-      }
-    }
-
-    getSensorState() {
-      return Object.assign({}, this.sensorState);
-    }
-
-    _handleIncomingData(rawText) {
-      if (rawText === undefined || rawText === null) return;
-      const text = String(rawText);
-      console.log('[BLE RX]', text.trim());
-
-      const lines = text.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
-      for (const line of lines) {
-        this._dispatchIncomingLine(line);
-      }
-    }
-
-    receiveMockData(text) {
-      this._handleIncomingData(text);
-    }
-
-    _updateSensorState(state, objectPresent, raw, sensorName = null) {
-      const now = new Date().toISOString();
-      if (!this.sensorState.sensors) {
-        this.sensorState.sensors = {
-          merah: { pin: 14, objectPresent: false, lastUpdated: null },
-          biru: { pin: 13, objectPresent: false, lastUpdated: null },
-          kuning: { pin: 35, objectPresent: false, lastUpdated: null },
-          arm: { pin: 34, objectPresent: false, lastUpdated: null }
-        };
-      }
-
-      if (sensorName) {
-        const sKey = String(sensorName).toLowerCase();
-        if (this.sensorState.sensors[sKey]) {
-          this.sensorState.sensors[sKey].objectPresent = Boolean(objectPresent);
-          this.sensorState.sensors[sKey].lastUpdated = now;
-        }
-      }
-
-      const anyTargetPresent = Object.values(this.sensorState.sensors).some(s => s.objectPresent);
-      const isPresent = Boolean(objectPresent !== undefined ? objectPresent : anyTargetPresent);
-
-      this.sensorState.state = state || (isPresent ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT');
-      this.sensorState.objectPresent = isPresent;
-      this.sensorState.timestamp = now;
-      this.sensorState.lastUpdated = now;
-      this.sensorState.raw = String(raw || '');
-
-      const sLabel = sensorName ? `Sensor ${sensorName.toUpperCase()}` : 'Sensor Fisik';
-      this._notify(
-        this.status,
-        isPresent ? `${sLabel}: Objek Terdeteksi` : `${sLabel}: Objek Belum/Tidak Terdeteksi`,
-        {
-          type: 'sensor_telemetry',
-          sensorName: sensorName ? sensorName.toLowerCase() : null,
-          pin: sensorName && this.sensorState.sensors[sensorName.toLowerCase()] ? this.sensorState.sensors[sensorName.toLowerCase()].pin : null,
-          objectPresent: isPresent,
-          sensorState: JSON.parse(JSON.stringify(this.sensorState))
-        }
-      );
-    }
-
-    _dispatchIncomingLine(line) {
-      // 1. Coba parsing JSON terlebih dahulu jika berformat { ... }
-      if (line.startsWith('{') && line.endsWith('}')) {
-        try {
-          const json = JSON.parse(line);
-          this.lastAck = json;
-          if (json.status && json.status === 'READY') {
-            this.status = CONNECTION_STATES.READY;
-          }
-
-          if (json.telemetry === 'sensors') {
-            if (typeof json.merah === 'boolean') this._updateSensorState(null, json.merah, line, 'merah');
-            if (typeof json.biru === 'boolean') this._updateSensorState(null, json.biru, line, 'biru');
-            if (typeof json.kuning === 'boolean') this._updateSensorState(null, json.kuning, line, 'kuning');
-            if (typeof json.arm === 'boolean') this._updateSensorState(null, json.arm, line, 'arm');
-            return;
-          }
-
-          if (json.sensor === 'present' || json.sensor === 'OBJECT_PRESENT' || json.objectPresent === true) {
-            const targetColor = json.targetSensor || json.color || (this._activeSortWaiter ? this._activeSortWaiter.targetColor : null);
-            this._updateSensorState('OBJECT_PRESENT', true, line, targetColor);
-            if (this._activeSortWaiter) {
-              this._activeSortWaiter.triggerSensorPresent(targetColor);
-            }
-          } else if (json.sensor === 'absent' || json.sensor === 'OBJECT_ABSENT' || json.objectPresent === false) {
-            const targetColor = json.targetSensor || json.color || (this._activeSortWaiter ? this._activeSortWaiter.targetColor : null);
-            this._updateSensorState('OBJECT_ABSENT', false, line, targetColor);
-          }
-
-          if (json.ack === 'mechanism' || json.cmd === 'mechanism' || json.mechanism) {
-            this._resolveMechanismWaiter(json.txId || json.id, json);
-          }
-
-          if (json.ack === 'sort' || json.cmd === 'sort' || json.status === 'COMPLETED' || json.status === 'VERIFIED') {
-            let isVerified = Boolean(json.sensorVerified || json.verified);
-            if (!isVerified && json.sensor && this.sensorState.sensors && this.sensorState.sensors[json.sensor.toLowerCase()]) {
-              isVerified = Boolean(this.sensorState.sensors[json.sensor.toLowerCase()].objectPresent);
-            }
-            this._resolveSortWaiter(json.id || json.txId, {
-              ok: json.ok !== false,
-              status: isVerified ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
-              sensorVerified: isVerified,
-              verified: isVerified,
-              sensor: json.sensor || null,
-              targetPin: json.targetPin || null,
-              raw: json
-            });
-          }
-          return;
-        } catch (e) {
-          // Bukan JSON, lanjutkan ke parser teks protokol
-        }
-      }
-
-      // 2. Pemrosesan Pesan Telemetri SENSOR:(MERAH|BIRU|KUNING|ARM):(OBJECT_PRESENT|OBJECT_ABSENT)
-      const sensorMatch = line.match(/^SENSOR:(MERAH|BIRU|KUNING|ARM):(OBJECT_PRESENT|OBJECT_ABSENT)$/i);
-      if (sensorMatch) {
-        const sensorName = sensorMatch[1].toLowerCase();
-        const isPresent = sensorMatch[2].toUpperCase() === 'OBJECT_PRESENT';
-        this._updateSensorState(isPresent ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT', isPresent, line, sensorName);
-        if (isPresent && this._activeSortWaiter) {
-          this._activeSortWaiter.triggerSensorPresent(sensorName);
-        }
-        return;
-      }
-
-      // 3. Pemrosesan Pesan Teks Protokol ESP32 BLE
-      const upper = line.toUpperCase();
-
-      if (upper.includes('STATUS:OBJECT_DETECTED') || upper === 'OBJECT_DETECTED') {
-        this.armObjectDetected = true;
-        this._updateSensorState('OBJECT_DETECTED', true, line, 'arm');
-        this._notify(this.status, 'Sensor ARM: Objek Terdeteksi (GPIO 34)', { type: 'stage_update', stage: 'OBJECT_DETECTED' });
-        if (this._activeSortWaiter) {
-          this._activeSortWaiter.triggerObjectDetected();
-        }
-      } else if (upper.includes('STATUS:BELT_STOPPED') || upper === 'BELT_STOPPED') {
-        this.beltRunning = false;
-        this._notify(this.status, 'Conveyor Belt: Berhenti', { type: 'stage_update', stage: 'BELT_STOPPED', beltRunning: false });
-        if (this._activeSortWaiter) {
-          this._activeSortWaiter.triggerBeltStopped();
-        }
-      } else if (upper.includes('STATUS:ARM_WORKING') || upper === 'ARM_WORKING') {
-        this.armWorking = true;
-        this._notify(this.status, 'Lengan Robotik: Memindahkan Objek', { type: 'stage_update', stage: 'ARM_WORKING' });
-        if (this._activeSortWaiter) {
-          this._activeSortWaiter.triggerArmWorking();
-        }
-      } else if (upper.includes('STATUS:TARGET_DETECTED') || upper === 'TARGET_DETECTED') {
-        this.targetDetected = true;
-        const targetColor = this._activeSortWaiter ? this._activeSortWaiter.targetColor : null;
-        this._updateSensorState('TARGET_DETECTED', true, line, targetColor);
-        const sensorLabel = targetColor ? `Sensor ${targetColor.toUpperCase()}` : 'Sensor Tujuan';
-        this._notify(this.status, `${sensorLabel}: Objek Terkonfirmasi`, { type: 'stage_update', stage: 'TARGET_DETECTED' });
-        if (this._activeSortWaiter) {
-          this._activeSortWaiter.triggerTargetDetected(targetColor);
-        }
-      } else if (upper.includes('STATUS:BELT_RESUMED') || upper === 'BELT_RESUMED') {
-        this.beltRunning = true;
-        this.armObjectDetected = false;
-        this._updateSensorState('OBJECT_ABSENT', false, line, 'arm');
-        this._notify(this.status, 'Conveyor Belt: Berjalan Kembali', { type: 'stage_update', stage: 'BELT_RESUMED', beltRunning: true });
-        if (this._activeSortWaiter) {
-          this._activeSortWaiter.triggerBeltResumed();
-        }
-      } else if (upper.includes('SENSOR:OBJECT_PRESENT') || upper === 'SENSOR:PRESENT') {
-        this._updateSensorState('OBJECT_PRESENT', true, line);
-        if (this._activeSortWaiter) {
-          this._activeSortWaiter.triggerSensorPresent();
-        }
-      } else if (upper.includes('SENSOR:OBJECT_ABSENT') || upper === 'SENSOR:ABSENT') {
-        this._updateSensorState('OBJECT_ABSENT', false, line);
-        if (this._activeSortWaiter && !this._activeSortWaiter.sensorVerified) {
-          this._activeSortWaiter.sensorVerified = false;
-        }
-      } else if (upper.includes('STATUS:SERVO_DONE')) {
-        if (this._activeSortWaiter) {
-          this._activeSortWaiter.triggerServoDone();
-        }
-      } else if (upper.includes('STATUS:COMPLETED_UNVERIFIED')) {
-        if (this._activeSortWaiter) {
-          this._activeSortWaiter.resolve({
-            ok: true,
-            status: 'COMPLETED_UNVERIFIED',
-            sensorVerified: false,
-            verified: false,
-            raw: line
-          });
-        }
-      } else if (upper.includes('STATUS:READY') || upper === 'READY') {
-        this.status = CONNECTION_STATES.READY;
-        this._resolveMechanismWaiter(null, { ok: true, status: 'READY', ready: true });
-      } else if (upper.includes('STATUS:STOPPED')) {
-        this.status = 'STOPPED';
-      }
-    }
-
-    _resolveSortWaiter(txId, result) {
-      if (txId && this._sortWaiters.has(txId)) {
-        const waiter = this._sortWaiters.get(txId);
-        waiter.resolve(result);
-        return;
-      }
-      if (this._activeSortWaiter) {
-        this._activeSortWaiter.resolve(result);
-      }
-    }
-
-    _resolveMechanismWaiter(txId, result) {
-      if (txId && this._mechanismWaiters.has(txId)) {
-        const waiter = this._mechanismWaiters.get(txId);
-        waiter.resolve(result);
-        this._mechanismWaiters.delete(txId);
-        return;
-      }
-      for (const [key, waiter] of this._mechanismWaiters.entries()) {
-        waiter.resolve(result);
-        this._mechanismWaiters.delete(key);
-      }
-    }
-
-    _waitForSortResponse(commandId, timeoutMs = 8000, options = {}) {
-      return new Promise((resolve, reject) => {
-        let settled = false;
-        let graceTimer = null;
-
-        const targetColor = options.color ? String(options.color).toLowerCase().trim() : null;
-        const targetMode = options.mode ? String(options.mode).toLowerCase().trim() : null;
-
-        // Cek initial verification khusus untuk sensor warna tujuan bila sudah mendeteksi objek
-        const initialVerified = Boolean(
-          targetColor &&
-          this.sensorState &&
-          this.sensorState.sensors &&
-          this.sensorState.sensors[targetColor] &&
-          this.sensorState.sensors[targetColor].objectPresent
-        );
-
-        const waiter = {
-          commandId,
-          targetColor,
-          targetMode,
-          sensorVerified: initialVerified,
-          servoDone: false,
-          objectDetected: false,
-          beltStopped: false,
-          armWorking: false,
-          targetDetected: initialVerified,
-          beltResumed: false,
-          resolve: (result) => {
-            if (settled) return;
-            settled = true;
-            if (graceTimer) clearTimeout(graceTimer);
-            clearTimeout(timeoutId);
-            this._activeSortWaiter = null;
-            if (commandId) this._sortWaiters.delete(commandId);
-            resolve(result);
-          },
-          reject: (err) => {
-            if (settled) return;
-            settled = true;
-            if (graceTimer) clearTimeout(graceTimer);
-            clearTimeout(timeoutId);
-            this._activeSortWaiter = null;
-            if (commandId) this._sortWaiters.delete(commandId);
-            reject(err);
-          },
-          triggerObjectDetected: () => {
-            waiter.objectDetected = true;
-          },
-          triggerBeltStopped: () => {
-            waiter.beltStopped = true;
-          },
-          triggerArmWorking: () => {
-            waiter.armWorking = true;
-          },
-          triggerTargetDetected: (detectedColor) => {
-            if (!detectedColor || !waiter.targetColor || detectedColor.toLowerCase() === waiter.targetColor.toLowerCase()) {
-              waiter.targetDetected = true;
-              waiter.sensorVerified = true;
-            }
-          },
-          triggerServoDone: () => {
-            waiter.servoDone = true;
-            if (waiter.targetDetected || waiter.sensorVerified) {
-              waiter.resolve({ ok: true, sensorVerified: true, verified: true, status: 'VERIFIED' });
-            } else {
-              if (graceTimer) clearTimeout(graceTimer);
-              graceTimer = setTimeout(() => {
-                const isV = Boolean(waiter.targetDetected || waiter.sensorVerified);
-                waiter.resolve({
-                  ok: true,
-                  sensorVerified: isV,
-                  verified: isV,
-                  status: isV ? 'VERIFIED' : 'COMPLETED_UNVERIFIED'
-                });
-              }, 400);
-            }
-          },
-          triggerSensorPresent: (sensorName) => {
-            if (!sensorName) {
-              waiter.sensorVerified = true;
-              waiter.targetDetected = true;
-            } else {
-              const sNorm = String(sensorName).toLowerCase();
-              if (waiter.targetColor && sNorm === waiter.targetColor.toLowerCase()) {
-                waiter.sensorVerified = true;
-                waiter.targetDetected = true;
-              } else if (sNorm === 'arm') {
-                waiter.objectDetected = true;
-              }
-            }
-            if (waiter.servoDone && waiter.sensorVerified) {
-              waiter.resolve({ ok: true, sensorVerified: true, verified: true, status: 'VERIFIED' });
-            }
-          },
-          triggerBeltResumed: () => {
-            waiter.beltResumed = true;
-            // Jika sensor tujuan terdeteksi -> VERIFIED
-            // Jika sensor tujuan tidak terdeteksi -> COMPLETED_UNVERIFIED
-            if (waiter.targetDetected || waiter.sensorVerified) {
-              waiter.resolve({
-                ok: true,
-                status: 'VERIFIED',
-                sensorVerified: true,
-                verified: true,
-                stage: 'BELT_RESUMED'
-              });
-            } else {
-              waiter.resolve({
-                ok: true,
-                status: 'COMPLETED_UNVERIFIED',
-                sensorVerified: false,
-                verified: false,
-                stage: 'BELT_RESUMED'
-              });
-            }
-          }
-        };
-
-        const timeoutId = setTimeout(() => {
-          if (waiter.servoDone || waiter.beltResumed) {
-            const isV = Boolean(waiter.targetDetected || waiter.sensorVerified);
-            waiter.resolve({
-              ok: true,
-              sensorVerified: isV,
-              verified: isV,
-              status: isV ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
-              timeout: true
-            });
-          } else {
-            waiter.reject(new Error(`Timeout menunggu respons ESP32 BLE (${timeoutMs}ms)`));
-          }
-        }, timeoutMs);
-
-        waiter.timeoutId = timeoutId;
-        this._activeSortWaiter = waiter;
-        if (commandId) {
-          this._sortWaiters.set(commandId, waiter);
-        }
-      });
-    }
-
-    async disconnect() {
-      if (this.device && this.device.gatt && this.device.gatt.connected) {
-        this.device.gatt.disconnect();
-      }
-      this.device = null;
-      this.server = null;
-      this.rxCharacteristic = null;
-      this.txCharacteristic = null;
-      this._notify(CONNECTION_STATES.DISCONNECTED, 'Koneksi ESP32 BLE diputuskan.');
-      return { ok: true };
-    }
-
-    async _writeBLE(payloadString) {
-      console.log('[BLE TX]', payloadString);
-      if (this.simulationMode) return true;
-      if (!this.rxCharacteristic) throw new Error('Karakteristik BLE RX tidak siap.');
-      const encoder = new TextEncoder();
-      const data = encoder.encode(payloadString + '\n');
-      if (this.rxCharacteristic.writeValueWithResponse) {
-        await this.rxCharacteristic.writeValueWithResponse(data);
-      } else {
-        await this.rxCharacteristic.writeValue(data);
-      }
-      return true;
-    }
-
-    async sendSortingCommand(params = {}) {
-      const rawColor = String(params.color || params || '').toLowerCase().trim();
-      let color = null;
-      if (rawColor.includes('kuning') || rawColor.includes('yellow')) color = 'kuning';
-      else if (rawColor.includes('biru') || rawColor.includes('blue')) color = 'biru';
-      else if (rawColor.includes('merah') || rawColor.includes('red')) color = 'merah';
-
-      if (!VALID_COLORS.includes(color)) {
-        throw new Error(`Warna tidak valid: "${params.color}". Harus salah satu dari: ${VALID_COLORS.join(', ')}`);
-      }
-
-      const mode = params.mode && VALID_MODES.includes(params.mode) ? params.mode : 'Servo';
-      const commandId = params.commandId || params.transactionId || `CMD_BLE_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const startTime = Date.now();
-      const timeoutMs = Number(params.timeoutMs) || 8000;
-
-      if (this.simulationMode) {
-        this._notify(CONNECTION_STATES.BUSY, `[Simulasi BLE] Sortir ${color}`);
-
-        // Simulasi tahapan konveyor dan ARM jika mode ARM
-        if (mode === 'Arm' || params.simulateArmCycle) {
-          this._notify(this.status, 'Sensor ARM: Objek Terdeteksi (GPIO 34)', { type: 'stage_update', stage: 'OBJECT_DETECTED' });
-          this._notify(this.status, 'Conveyor Belt: Berhenti', { type: 'stage_update', stage: 'BELT_STOPPED', beltRunning: false });
-          await new Promise(r => setTimeout(r, 60));
-
-          this._notify(this.status, 'Lengan Robotik: Memindahkan Objek', { type: 'stage_update', stage: 'ARM_WORKING' });
-          await new Promise(r => setTimeout(r, 80));
-
-          const simulateTarget = params.simulateTargetDetected !== false && Boolean(params.simulateSensorVerification || (this.sensorState && this.sensorState.objectPresent));
-          if (simulateTarget) {
-            this._updateSensorState('TARGET_DETECTED', true, 'SIM_TARGET_DETECTED');
-            this._notify(this.status, 'Sensor Tujuan: Objek Terkonfirmasi', { type: 'stage_update', stage: 'TARGET_DETECTED' });
-          }
-
-          await new Promise(r => setTimeout(r, 60));
-          this._notify(this.status, 'Conveyor Belt: Berjalan Kembali', { type: 'stage_update', stage: 'BELT_RESUMED', beltRunning: true });
-
-          const durationMs = Date.now() - startTime;
-          const isVerified = Boolean(simulateTarget);
-          const result = {
-            ok: true,
-            simulated: true,
-            commandId,
-            color,
-            mode,
-            status: isVerified ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
-            sensorVerified: isVerified,
-            verified: isVerified,
-            executionStatus: 'simulated_esp32_ble',
-            durationMs,
-            message: `Simulasi BLE ARM ${color} selesai (${isVerified ? 'TERVERIFIKASI FISIK' : 'BELUM TERVERIFIKASI FISIK'}).`
-          };
-          this.lastAck = result;
-          this._notify(CONNECTION_STATES.SIMULATED, `[Simulasi BLE] Selesai ${color}`);
-          return result;
-        }
-
-        // Verifikasi fisik sensor hanya valid bila ada bukti fisik aktual (atau opsi simulasi sensor aktif)
-        const simulateSensor = Boolean(params.simulateSensorVerification || (this.sensorState && this.sensorState.objectPresent));
-        await new Promise(r => setTimeout(r, 260));
-        const durationMs = Date.now() - startTime;
-        const result = {
-          ok: true,
-          simulated: true,
-          commandId,
-          color,
-          mode,
-          status: simulateSensor ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
-          sensorVerified: simulateSensor,
-          verified: simulateSensor,
-          executionStatus: 'simulated_esp32_ble',
-          durationMs,
-          message: `Simulasi BLE ${color} selesai (${simulateSensor ? 'TERVERIFIKASI FISIK' : 'BELUM TERVERIFIKASI FISIK'}).`
-        };
-        this.lastAck = result;
-        this._notify(CONNECTION_STATES.SIMULATED, `[Simulasi BLE] Selesai ${color}`);
-        return result;
-      }
-
-      this._notify(CONNECTION_STATES.BUSY, `Mengirim sortir BLE ${color}...`);
-      try {
-        const canonicalClass = params.canonicalClass || (color ? `${color}_${mode.toLowerCase()}` : '');
-        const payload = JSON.stringify({ cmd: 'sort', color, mode, class: canonicalClass, id: commandId });
-        
-        // Buat waiter untuk menunggu respons ACK / sensor fisik dari ESP32
-        const sortPromise = this._waitForSortResponse(commandId, timeoutMs, { color, mode });
-        
-        await this._writeBLE(payload);
-        
-        const response = await sortPromise;
-        const durationMs = Date.now() - startTime;
-        const isVerified = Boolean(response.sensorVerified || response.verified);
-
-        const result = {
-          ok: true,
-          commandId,
-          color,
-          mode,
-          status: isVerified ? 'VERIFIED' : 'COMPLETED_UNVERIFIED',
-          sensorVerified: isVerified,
-          verified: isVerified,
-          executionStatus: 'confirmed_esp32_ble',
-          durationMs,
-          rawResponse: response
-        };
-        this.lastAck = result;
-        this._notify(
-          CONNECTION_STATES.CONNECTED,
-          `Sortir BLE ${color} selesai (${isVerified ? 'TERVERIFIKASI FISIK' : 'BELUM TERVERIFIKASI FISIK'}) [${durationMs}ms]`
-        );
-        return result;
-      } catch (err) {
-        const durationMs = Date.now() - startTime;
-        this.lastError = err.message;
-        this._notify(CONNECTION_STATES.ERROR, `Gagal kirim BLE: ${err.message}`);
-        return {
-          ok: false,
-          commandId,
-          color,
-          mode,
-          status: 'FAILED',
-          errorCode: 'ERR_ESP32_BLE_WRITE_FAILED',
-          durationMs,
-          error: err.message
-        };
-      }
-    }
-
-    async sendModeCommand(modeName) {
-      const mode = VALID_MODES.includes(modeName) ? modeName : 'Servo';
-      if (this.simulationMode) return { ok: true, simulated: true, mode };
-      try {
-        await this._writeBLE(JSON.stringify({ cmd: 'mode', mode }));
-        return { ok: true, mode };
-      } catch (err) {
-        return { ok: false, mode, error: err.message };
-      }
-    }
-
-    async setMechanism(mechanism, options = {}) {
-      const mode = String(mechanism || '').toLowerCase().trim() === 'arm' ? 'Arm' : 'Servo';
-      const txId = options.transactionId || `TX_BLE_MECH_${Date.now()}`;
-      if (this.simulationMode) {
-        await new Promise(r => setTimeout(r, 60));
-        const res = {
-          ok: true,
-          simulated: true,
-          transactionId: txId,
-          mechanism: mode.toLowerCase(),
-          mode: mode,
-          status: 'READY',
-          ready: true,
-          message: `Mekanisme ${mode} siap (Simulasi BLE).`
-        };
-        this.lastAck = res;
-        return res;
-      }
-      try {
-        const payload = JSON.stringify({ cmd: 'mechanism', mechanism: mode.toLowerCase(), mode, txId });
-        await this._writeBLE(payload);
-        const res = {
-          ok: true,
-          transactionId: txId,
-          mechanism: mode.toLowerCase(),
-          mode: mode,
-          status: 'READY',
-          ready: true
-        };
-        this.lastAck = res;
-        return res;
-      } catch (err) {
-        this.lastError = err.message;
-        throw new Error(`Gagal konfirmasi mekanisme ${mode} via BLE: ${err.message}`);
-      }
-    }
-
-    async sortObject(color, mechanism, options = {}) {
-      const mode = String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo';
-      return await this.sendSortingCommand({
-        color,
-        mode,
-        canonicalClass: options.detectedClass || `${color}_${mode.toLowerCase()}`,
-        commandId: options.transactionId,
-        ...options
-      });
-    }
-
-    async sendEmergencyStop() {
-      if (this.simulationMode) return { ok: true, simulated: true, status: 'STOPPED' };
-      try {
-        await this._writeBLE(JSON.stringify({ cmd: 'stop' }));
-        return { ok: true, status: 'STOPPED' };
-      } catch (err) {
-        return { ok: false, error: err.message };
-      }
-    }
-
-    async sendTestPulse() {
-      if (this.simulationMode) return { ok: true, simulated: true, message: 'Pulse test OK' };
-      try {
-        await this._writeBLE(JSON.stringify({ cmd: 'pulse' }));
-        return { ok: true, message: 'Pulse test sent' };
-      } catch (err) {
-        return { ok: false, error: err.message };
-      }
-    }
-  }
-
-  // =========================================================================
-  // 4. BBC MICRO:BIT BLE ADAPTER (MakeCode Bluetooth UART Service)
-  // =========================================================================
-  class MicrobitBLEAdapter extends BaseDeviceAdapter {
-    constructor(config = {}) {
-      super(DEVICE_TYPES.MICROBIT, CONNECTION_TYPES.BLE, config);
-      this.device = null;
-      this.server = null;
-      this.rxCharacteristic = null;
-      this.txCharacteristic = null;
       if (this.simulationMode) {
         this._initSimulatedTelemetry();
       }
@@ -1516,8 +142,55 @@
       };
     }
 
+    addListener(fn) {
+      if (typeof fn === 'function') this._listeners.add(fn);
+      return () => this._listeners.delete(fn);
+    }
+
+    onStatusChange(fn) {
+      return this.addListener(fn);
+    }
+
+    _notify(status, message = '', extra = {}) {
+      this.status = status;
+      const ev = {
+        deviceType: this.deviceType,
+        connectionType: this.connectionType,
+        status,
+        message,
+        timestamp: new Date().toISOString(),
+        ...extra
+      };
+      this._listeners.forEach(fn => {
+        try { fn(ev); } catch (e) { console.warn('Listener error:', e); }
+      });
+    }
+
     isSupported() {
       return isWebBluetoothSupported();
+    }
+
+    getStatus() {
+      return {
+        deviceType: this.deviceType,
+        connectionType: this.connectionType,
+        state: this.status,
+        simulationMode: this.simulationMode,
+        lastError: this.lastError,
+        telemetry: this.lastTelemetry
+      };
+    }
+
+    setSimulation(isSim) {
+      this.simulationMode = Boolean(isSim);
+      if (this.simulationMode) {
+        this._initSimulatedTelemetry();
+        this._notify(CONNECTION_STATES.SIMULATED, 'Mode simulasi micro:bit aktif.');
+      } else {
+        this.status = this.device && this.device.gatt?.connected ? CONNECTION_STATES.CONNECTED : CONNECTION_STATES.DISCONNECTED;
+        this._notify(this.status, 'Mode perangkat fisik aktif.');
+      }
+      return this.simulationMode;
     }
 
     async connect() {
@@ -1528,18 +201,17 @@
       }
 
       if (!this.isSupported()) {
-        const errMsg = 'Web Bluetooth API tidak didukung di browser ini. Gunakan Google Chrome atau Microsoft Edge desktop melalui HTTPS atau localhost.';
+        const errMsg = 'Web Bluetooth API tidak didukung di browser ini. Gunakan Google Chrome atau Microsoft Edge melalui HTTPS atau localhost.';
         this.lastError = errMsg;
         this._notify(CONNECTION_STATES.ERROR, errMsg);
         return { ok: false, error: errMsg, unsupported: true };
       }
 
       try {
-        this._notify(CONNECTION_STATES.CONNECTING, 'Memindai perangkat BBC micro:bit...');
+        this._notify(CONNECTION_STATES.CONNECTING, 'Memindai BBC micro:bit...');
         this.device = await navigator.bluetooth.requestDevice({
           filters: [
-            { namePrefix: 'BBC micro:bit' },
-            { services: [NORDIC_UART_SERVICE_UUID] }
+            { namePrefix: 'BBC micro:bit' }
           ],
           optionalServices: [NORDIC_UART_SERVICE_UUID]
         });
@@ -1553,8 +225,7 @@
 
         const service = await this.server.getPrimaryService(NORDIC_UART_SERVICE_UUID);
 
-        // Pada micro:bit MakeCode BLE UART:
-        // RX Char (Web -> micro:bit) biasanya 6e400003 atau 6e400002 bergantung versi
+        // Ambil characteristics RX (write) dan TX (notify)
         const chars = await service.getCharacteristics();
         this.rxCharacteristic = chars.find(c => c.properties.write || c.properties.writeWithoutResponse);
         this.txCharacteristic = chars.find(c => c.properties.notify || c.properties.indicate);
@@ -1592,6 +263,7 @@
       const clean = String(text || '').trim();
       if (clean) {
         this.lastAck = { raw: clean, timestamp: new Date().toISOString() };
+        this._notify(this.status, `[micro:bit RX] ${clean}`, { rawText: clean });
       }
     }
 
@@ -1607,9 +279,6 @@
       return { ok: true };
     }
 
-    /**
-     * Mengirim string ASCII berakhiran newline (\n) yang dipahami oleh MakeCode UART
-     */
     async _writeMakeCodeCommand(str) {
       if (this.simulationMode) return true;
       if (!this.rxCharacteristic) throw new Error('Karakteristik micro:bit UART tidak siap.');
@@ -1637,10 +306,10 @@
       const commandId = params.commandId || `CMD_MBIT_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const startTime = Date.now();
 
-      // Kasus A: Simulasi
+      // Kasus A: Simulasi Virtual
       if (this.simulationMode) {
         this._notify(CONNECTION_STATES.BUSY, `[micro:bit Simulasi] Sortir ${color}`);
-        await new Promise(r => setTimeout(r, 270));
+        await new Promise(r => setTimeout(r, 200));
         const durationMs = Date.now() - startTime;
         const result = {
           ok: true,
@@ -1658,7 +327,7 @@
         return result;
       }
 
-      // Kasus B: Hardware Nyata
+      // Kasus B: Hardware Nyata via BLE
       this._notify(CONNECTION_STATES.BUSY, `Mengirim ke micro:bit: "${color}"...`);
       try {
         await this._writeMakeCodeCommand(color);
@@ -1694,7 +363,7 @@
 
     async sendModeCommand(modeName) {
       const mode = VALID_MODES.includes(modeName) ? modeName : 'Servo';
-      const cmdStr = mode.toLowerCase(); // 'servo' atau 'arm'
+      const cmdStr = mode.toLowerCase();
       if (this.simulationMode) return { ok: true, simulated: true, mode };
       try {
         await this._writeMakeCodeCommand(cmdStr);
@@ -1704,55 +373,14 @@
       }
     }
 
-    async setMechanism(mechanism, options = {}) {
-      const mode = String(mechanism || '').toLowerCase().trim() === 'arm' ? 'arm' : 'servo';
-      const txId = options.transactionId || `TX_MBIT_MECH_${Date.now()}`;
-      if (this.simulationMode) {
-        await new Promise(r => setTimeout(r, 60));
-        const res = {
-          ok: true,
-          simulated: true,
-          transactionId: txId,
-          mechanism: mode,
-          status: 'READY',
-          ready: true,
-          message: `Mekanisme ${mode} micro:bit siap (Simulasi).`
-        };
-        this.lastAck = res;
-        return res;
-      }
-      try {
-        await this._writeMakeCodeCommand(mode);
-        const res = {
-          ok: true,
-          transactionId: txId,
-          mechanism: mode,
-          status: 'READY',
-          ready: true
-        };
-        this.lastAck = res;
-        return res;
-      } catch (err) {
-        this.lastError = err.message;
-        throw new Error(`Gagal konfirmasi mekanisme ${mode} via micro:bit: ${err.message}`);
-      }
-    }
-
-    async sortObject(color, mechanism, options = {}) {
-      const mode = String(mechanism || '').toLowerCase() === 'arm' ? 'Arm' : 'Servo';
-      return await this.sendSortingCommand({
-        color,
-        mode,
-        canonicalClass: options.detectedClass || `${color}_${mode.toLowerCase()}`,
-        commandId: options.transactionId,
-        ...options
-      });
-    }
-
     async sendEmergencyStop() {
-      if (this.simulationMode) return { ok: true, simulated: true, status: 'STOPPED' };
+      if (this.simulationMode) {
+        this._notify(CONNECTION_STATES.SIMULATED, 'Emergency stop (Simulasi micro:bit)');
+        return { ok: true, simulated: true, status: 'STOPPED' };
+      }
       try {
         await this._writeMakeCodeCommand('stop');
+        this._notify(CONNECTION_STATES.CONNECTED, 'Emergency stop terkirim ke micro:bit.');
         return { ok: true, status: 'STOPPED' };
       } catch (err) {
         return { ok: false, error: err.message };
@@ -1760,10 +388,10 @@
     }
 
     async sendTestPulse() {
-      if (this.simulationMode) return { ok: true, simulated: true, message: 'Pulse test OK' };
+      if (this.simulationMode) return { ok: true, simulated: true, status: 'PULSE_ACK' };
       try {
-        await this._writeMakeCodeCommand('test');
-        return { ok: true, message: 'Pulse test sent' };
+        await this._writeMakeCodeCommand('ping');
+        return { ok: true, status: 'PULSE_ACK' };
       } catch (err) {
         return { ok: false, error: err.message };
       }
@@ -1771,91 +399,62 @@
   }
 
   // =========================================================================
-  // 5. UNIFIED DEVICE CONNECTION MANAGER (Orchestrator)
+  // 4. DEVICE CONNECTION MANAGER (Pengelola Komunikasi micro:bit & Debounce)
   // =========================================================================
   class DeviceConnectionManager {
-    constructor(options = {}) {
-      this.STORAGE_KEY = 'vernova_device_config';
-      this.config = this._loadSavedConfig(options);
-      
-      this.activeAdapter = null;
-      this._managerListeners = new Set();
-      this._adapterUnsubscribe = null;
-
-      // Mode Pengoperasian: AUTO (otomatis via AI) vs MANUAL (pilihan dashboard)
-      this.operatingMode = this.config.operatingMode || OPERATING_MODES.AUTO;
-
-      // Konfigurasi Pemetaan Mekanisme untuk Model Warisan (3 warna)
-      this.legacyMechanismMap = Object.assign({
-        merah: 'servo',
-        kuning: 'servo',
-        biru: 'arm'
-      }, this.config.legacyMechanismMap || {});
-
-      // Status Transaksi & Pelacakan Siklus Sortir
-      this.currentTransaction = null;
-      this.transactionHistory = [];
-      this.maxHistorySize = 50;
-
-      // Debounce & Duplicate Suppression Guard
-      this.lastDispatchedCommand = null;
-      this.lastDispatchedTime = 0;
-      this.debounceMs = 500; // 500ms cooldown window untuk mencegah double-trigger
-
-      // Inisialisasi adapter berdasarkan konfigurasi aktif
-      this._initAdapter();
-    }
-
-    _loadSavedConfig(overrides = {}) {
-      const defaults = {
-        deviceType: DEVICE_TYPES.ESP32,
-        connectionType: CONNECTION_TYPES.WIFI,
-        host: 'http://192.168.4.1',
-        deviceName: '',
-        simulationMode: false,
-        autoReconnect: false,
-        operatingMode: OPERATING_MODES.AUTO,
-        legacyMechanismMap: {
-          merah: 'servo',
-          kuning: 'servo',
-          biru: 'arm'
-        }
+    constructor(config = {}) {
+      this.config = {
+        deviceType: DEVICE_TYPES.MICROBIT,
+        connectionType: CONNECTION_TYPES.BLE,
+        debounceMs: config.debounceMs || 1200,
+        simulationMode: Boolean(config.simulationMode),
+        operatingMode: config.operatingMode || OPERATING_MODES.AUTO,
+        ...config
       };
 
-      if (typeof localStorage !== 'undefined') {
-        try {
-          const raw = localStorage.getItem(this.STORAGE_KEY);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            return Object.assign({}, defaults, parsed, overrides);
-          }
-          // Fallback legacy migrasi dari esp32_host / esp32_sim
-          const legacyHost = localStorage.getItem('esp32_host');
-          const legacySim = localStorage.getItem('esp32_sim') === 'true';
-          if (legacyHost || legacySim) {
-            defaults.host = legacyHost || defaults.host;
-            defaults.simulationMode = legacySim;
-          }
-        } catch (e) {
-          console.warn('Gagal membaca saved device config:', e);
-        }
-      }
-      return Object.assign({}, defaults, overrides);
+      this.operatingMode = this.config.operatingMode;
+      this.adapter = new MicrobitBLEAdapter({
+        simulationMode: this.config.simulationMode,
+        deviceName: config.deviceName
+      });
+
+      this.lastDispatchedColor = null;
+      this.lastDispatchedTime = 0;
+      this.listeners = new Set();
+
+      // Teruskan notifikasi dari adapter ke manager listeners
+      this.adapter.onStatusChange(ev => {
+        this.listeners.forEach(fn => {
+          try { fn(ev); } catch (e) { console.warn('Manager listener error:', e); }
+        });
+      });
     }
 
-    saveConfig(newConfig = {}) {
-      this.config = Object.assign({}, this.config, newConfig);
-      if (typeof localStorage !== 'undefined') {
-        try {
-          localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.config));
-          // Sinkronisasi legacy keys agar kompatibel
-          if (this.config.host) localStorage.setItem('esp32_host', this.config.host);
-          localStorage.setItem('esp32_sim', this.config.simulationMode ? 'true' : 'false');
-        } catch (e) {
-          console.warn('Gagal menyimpan device config:', e);
-        }
-      }
-      return this;
+    addListener(fn) {
+      if (typeof fn === 'function') this.listeners.add(fn);
+      return () => this.listeners.delete(fn);
+    }
+
+    onStatusChange(fn) {
+      return this.addListener(fn);
+    }
+
+    getActiveAdapter() {
+      return this.adapter;
+    }
+
+    getStatus() {
+      return this.adapter.getStatus();
+    }
+
+    isSimulated() {
+      return this.adapter.simulationMode;
+    }
+
+    setSimulation(isSim) {
+      const res = this.adapter.setSimulation(isSim);
+      this.config.simulationMode = res;
+      return res;
     }
 
     getOperatingMode() {
@@ -1864,523 +463,94 @@
 
     setOperatingMode(mode) {
       const m = String(mode || '').toUpperCase().trim();
-      if (!OPERATING_MODES[m]) {
-        throw new Error(`Operating mode tidak valid: "${mode}". Harus AUTO atau MANUAL.`);
-      }
-      if (this.currentTransaction && this.isTransactionActive()) {
-        return {
-          ok: false,
-          busy: true,
-          error: 'TRANSACTION_IN_PROGRESS',
-          message: `Tidak dapat berpindah ke mode ${m} saat transaksi "${this.currentTransaction.id}" sedang berlangsung.`
-        };
+      if (m !== OPERATING_MODES.AUTO && m !== OPERATING_MODES.MANUAL) {
+        return { ok: false, error: 'INVALID_MODE', message: 'Mode harus AUTO atau MANUAL.' };
       }
       this.operatingMode = m;
-      this.saveConfig({ operatingMode: m });
-      this._notifyManagerListeners({
-        type: 'operating_mode_changed',
-        operatingMode: this.operatingMode,
-        timestamp: new Date().toISOString()
+      this.listeners.forEach(fn => {
+        try { fn({ type: 'operating_mode_changed', operatingMode: m }); } catch (e) {}
       });
-      return { ok: true, operatingMode: this.operatingMode };
-    }
-
-    getLegacyMechanismMap() {
-      return Object.assign({}, this.legacyMechanismMap);
-    }
-
-    setLegacyMechanismMap(map = {}) {
-      this.legacyMechanismMap = Object.assign({}, this.legacyMechanismMap, map);
-      this.saveConfig({ legacyMechanismMap: this.legacyMechanismMap });
-      return this.legacyMechanismMap;
-    }
-
-    isTransactionActive() {
-      if (!this.currentTransaction) return false;
-      const activeStates = [
-        TRANSACTION_STATES.COMMAND_QUEUED,
-        TRANSACTION_STATES.AWAITING_MECHANISM_ACK,
-        TRANSACTION_STATES.AWAITING_CLASS_ACK,
-        TRANSACTION_STATES.SORTING,
-        TRANSACTION_STATES.VERIFYING
-      ];
-      const isStateActive = activeStates.includes(this.currentTransaction.state);
-      const isTimedOut = (Date.now() - (this.currentTransaction.startTime || 0)) > 10000;
-      if (isTimedOut && isStateActive) {
-        this.currentTransaction.state = TRANSACTION_STATES.TIMEOUT;
-        this.currentTransaction.statusCategory = STATUS_CATEGORIES.TIMEOUT;
-        return false;
-      }
-      return isStateActive;
-    }
-
-    getCurrentTransaction() {
-      return this.currentTransaction ? Object.assign({}, this.currentTransaction) : null;
-    }
-
-    getTransactionHistory() {
-      return this.transactionHistory.slice();
-    }
-
-    _recordTransaction(tx) {
-      this.currentTransaction = tx;
-      this.transactionHistory.unshift(Object.assign({}, tx));
-      if (this.transactionHistory.length > this.maxHistorySize) {
-        this.transactionHistory.pop();
-      }
-    }
-
-    _initAdapter() {
-      if (this._adapterUnsubscribe) {
-        this._adapterUnsubscribe();
-        this._adapterUnsubscribe = null;
-      }
-      if (this.activeAdapter && typeof this.activeAdapter.dispose === 'function') {
-        this.activeAdapter.dispose();
-      }
-
-      const { deviceType, connectionType, host, deviceName, simulationMode } = this.config;
-
-      if (deviceType === DEVICE_TYPES.ESP32) {
-        if (connectionType === CONNECTION_TYPES.BLE) {
-          this.activeAdapter = new ESP32BLEAdapter({ deviceName, simulationMode });
-        } else {
-          this.activeAdapter = new ESP32WiFiAdapter({ host, simulationMode });
-        }
-      } else if (deviceType === DEVICE_TYPES.MICROBIT) {
-        // micro:bit selalu menggunakan BLE UART (tidak punya Wi-Fi onboard)
-        this.activeAdapter = new MicrobitBLEAdapter({ deviceName, simulationMode });
-      } else {
-        // Fallback default ESP32 Wi-Fi
-        this.activeAdapter = new ESP32WiFiAdapter({ host, simulationMode });
-      }
-
-      this._adapterUnsubscribe = this.activeAdapter.onStatusChange((event) => {
-        if (event && event.type === 'sensor_telemetry' && event.sensorState) {
-          this.lastSensorState = event.sensorState;
-          if (this.currentTransaction && (this.currentTransaction.state === TRANSACTION_STATES.SORTING || this.currentTransaction.state === TRANSACTION_STATES.AWAITING_CLASS_ACK)) {
-            if (event.sensorState.objectPresent) {
-              this.currentTransaction.sensorVerified = true;
-              this.currentTransaction.verified = true;
-            }
-          }
-        }
-        this._notifyManagerListeners(event);
-      });
-    }
-
-    getSensorState() {
-      if (this.activeAdapter && typeof this.activeAdapter.getSensorState === 'function') {
-        return this.activeAdapter.getSensorState();
-      }
-      return this.lastSensorState || { state: 'IDLE', objectPresent: false, timestamp: null };
-    }
-
-    onStatusChange(fn) {
-      if (typeof fn === 'function') this._managerListeners.add(fn);
-      return () => this._managerListeners.delete(fn);
-    }
-
-    _notifyManagerListeners(event) {
-      const enrichedEvent = Object.assign({}, event, {
-        managerDeviceType: this.config.deviceType,
-        managerConnectionType: this.config.connectionType
-      });
-      this._managerListeners.forEach(fn => {
-        try { fn(enrichedEvent); } catch (e) { console.error('Manager listener error:', e); }
-      });
-    }
-
-    async switchDevice(deviceType, connectionType, extraConfig = {}) {
-      // Validasi kombinasi perangkat & metode koneksi
-      if (deviceType === DEVICE_TYPES.MICROBIT && connectionType === CONNECTION_TYPES.WIFI) {
-        throw new Error('BBC micro:bit tidak mendukung Wi-Fi. Pilih koneksi Bluetooth Low Energy (BLE).');
-      }
-
-      const newConfig = Object.assign({}, this.config, extraConfig, {
-        deviceType,
-        connectionType
-      });
-
-      // Putuskan koneksi adapter saat ini bila sedang tersambung
-      if (this.activeAdapter) {
-        try { await this.activeAdapter.disconnect(); } catch (e) { /* ignore */ }
-      }
-
-      this.saveConfig(newConfig);
-      this._initAdapter();
-      return this.activeAdapter;
-    }
-
-    setSimulation(enabled) {
-      this.config.simulationMode = Boolean(enabled);
-      this.saveConfig({ simulationMode: this.config.simulationMode });
-      if (this.activeAdapter) {
-        this.activeAdapter.setSimulation(this.config.simulationMode);
-      }
-      return this;
-    }
-
-    isSimulated() {
-      return Boolean(this.config.simulationMode);
-    }
-
-    getActiveAdapter() {
-      return this.activeAdapter;
-    }
-
-    getStatus() {
-      const adapterStatus = this.activeAdapter ? this.activeAdapter.getStatus() : {
-        online: false,
-        state: CONNECTION_STATES.DISCONNECTED
-      };
-      return Object.assign({}, adapterStatus, {
-        deviceType: this.config.deviceType,
-        connectionType: this.config.connectionType,
-        host: this.config.host,
-        deviceName: this.config.deviceName,
-        simulationMode: this.config.simulationMode
-      });
+      return { ok: true, operatingMode: m };
     }
 
     async connect() {
-      if (!this.activeAdapter) this._initAdapter();
-      return await this.activeAdapter.connect();
+      return await this.adapter.connect();
     }
 
     async disconnect() {
-      if (this.activeAdapter) {
-        return await this.activeAdapter.disconnect();
-      }
-      return { ok: true };
+      return await this.adapter.disconnect();
     }
 
     async sendTestPulse() {
-      if (!this.activeAdapter) this._initAdapter();
-      return await this.activeAdapter.sendTestPulse();
-    }
-
-    async dispatchModeCommand(newMode) {
-      if (!this.activeAdapter) this._initAdapter();
-      return await this.activeAdapter.sendModeCommand(newMode);
+      return await this.adapter.sendTestPulse();
     }
 
     async dispatchEmergencyStop() {
-      if (!this.activeAdapter) this._initAdapter();
-      return await this.activeAdapter.sendEmergencyStop();
+      return await this.adapter.sendEmergencyStop();
+    }
+
+    async dispatchModeCommand(modeName) {
+      return await this.adapter.sendModeCommand(modeName);
+    }
+
+    async sendManualSort(params = {}) {
+      return await this.dispatchSortingCommand({ ...params, force: true });
     }
 
     /**
-     * Eksekusi transaksi pemilahan 2-tahap (Two-Stage Sorting Cycle):
-     * Tahap 1: Pengiriman & konfirmasi kesiapan mekanisme (Arm / Servo).
-     * Tahap 2: Pengiriman perintah pemilahan kelas warna setelah mekanisme siap.
-     * Tahap 3: Verifikasi keberhasilan fisik sensor.
-     */
-    async executeTwoStageSort(targetColor, targetMechanism, options = {}) {
-      if (!this.activeAdapter) this._initAdapter();
-
-      const txId = options.transactionId || `TX_${this.operatingMode}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const startTime = Date.now();
-      const normColor = String(targetColor || '').toLowerCase().trim();
-      const normMech = String(targetMechanism || '').toLowerCase().trim();
-
-      const tx = {
-        id: txId,
-        transactionId: txId,
-        source: options.source || this.operatingMode,
-        aiEngine: options.aiEngine || (this.operatingMode === OPERATING_MODES.MANUAL ? 'manual' : 'yolo'),
-        modelId: options.modelId || null,
-        detectedClass: options.detectedClass || `${normColor}_${normMech}`,
-        color: normColor,
-        mechanism: normMech,
-        confidence: Number(options.confidence) || 1.0,
-        state: TRANSACTION_STATES.COMMAND_QUEUED,
-        statusCategory: STATUS_CATEGORIES.COMMAND_SENT,
-        deviceType: this.config.deviceType,
-        connectionType: this.config.connectionType,
-        startTime,
-        durationMs: 0,
-        mechanismAck: null,
-        classAck: null,
-        verified: false,
-        error: null
-      };
-
-      this._recordTransaction(tx);
-      this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
-
-      try {
-        // TAHAP 1: Set & Konfirmasi Kesiapan Mekanisme (AwaitingMechanismAck)
-        tx.state = TRANSACTION_STATES.AWAITING_MECHANISM_ACK;
-        this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
-
-        const mechResp = await this.activeAdapter.setMechanism(normMech, {
-          transactionId: txId,
-          timeoutMs: options.mechanismTimeoutMs || 5000
-        });
-
-        if (!mechResp || !mechResp.ok) {
-          throw new Error(mechResp?.error || `Perangkat menolak kesiapan mekanisme ${normMech}`);
-        }
-
-        tx.mechanismAck = mechResp;
-        tx.state = TRANSACTION_STATES.AWAITING_CLASS_ACK;
-        tx.statusCategory = STATUS_CATEGORIES.COMMAND_ACKNOWLEDGED;
-        this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
-
-        // TAHAP 2: Eksekusi Perintah Pemilahan Kelas Warna (Sorting)
-        tx.state = TRANSACTION_STATES.SORTING;
-        tx.statusCategory = STATUS_CATEGORIES.SORTING;
-        this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
-
-        const sortResp = await this.activeAdapter.sortObject(normColor, normMech, {
-          transactionId: txId,
-          timeoutMs: options.sortTimeoutMs || 8000,
-          ...options
-        });
-
-        if (!sortResp || !sortResp.ok) {
-          throw new Error(sortResp?.error || `Perangkat gagal mengeksekusi sortir ${normColor}`);
-        }
-
-        tx.classAck = sortResp;
-        tx.durationMs = Date.now() - startTime;
-
-        // TAHAP 3: Verifikasi Sensor Fisik
-        const colorSensorPresent = Boolean(
-          this.activeAdapter &&
-          this.activeAdapter.sensorState &&
-          this.activeAdapter.sensorState.sensors &&
-          this.activeAdapter.sensorState.sensors[normColor] &&
-          this.activeAdapter.sensorState.sensors[normColor].objectPresent
-        );
-
-        const hasSensorVerification = Boolean(
-          sortResp.sensorVerified === true ||
-          sortResp.verified === true ||
-          tx.sensorVerified === true ||
-          colorSensorPresent ||
-          (this.activeAdapter && this.activeAdapter.sensorState && this.activeAdapter.sensorState.objectPresent && this.activeAdapter.sensorState.lastTxId === txId)
-        );
-        if (hasSensorVerification) {
-          tx.state = TRANSACTION_STATES.VERIFYING;
-          tx.verified = true;
-          tx.sensorVerified = true;
-          tx.statusCategory = STATUS_CATEGORIES.VERIFIED;
-        } else {
-          tx.verified = false;
-          tx.sensorVerified = false;
-          tx.statusCategory = STATUS_CATEGORIES.COMPLETED_UNVERIFIED;
-        }
-
-        tx.state = TRANSACTION_STATES.COMPLETED;
-        this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
-
-        return {
-          ok: true,
-          transaction: tx,
-          commandId: txId,
-          color: normColor,
-          mode: normMech,
-          status: tx.state,
-          statusCategory: tx.statusCategory,
-          verified: tx.verified,
-          durationMs: tx.durationMs,
-          rawResponse: sortResp
-        };
-      } catch (err) {
-        tx.durationMs = Date.now() - startTime;
-        const isTimeout = /timeout/i.test(err.message);
-        tx.state = isTimeout ? TRANSACTION_STATES.TIMEOUT : TRANSACTION_STATES.FAILED;
-        tx.statusCategory = isTimeout ? STATUS_CATEGORIES.TIMEOUT : STATUS_CATEGORIES.FAILED;
-        tx.error = err.message;
-        this._notifyManagerListeners({ type: 'transaction_update', transaction: tx });
-
-        return {
-          ok: false,
-          transaction: tx,
-          commandId: txId,
-          color: normColor,
-          mode: normMech,
-          status: tx.state,
-          statusCategory: tx.statusCategory,
-          verified: false,
-          durationMs: tx.durationMs,
-          error: err.message
-        };
-      }
-    }
-
-    /**
-     * Dispatcher terpadu untuk perintah pemilahan warna dari AI Vision / input manual.
-     * Menggunakan siklus 2-tahap, isolasi mode Auto/Manual, dan pencegahan duplikasi.
+     * Dispatch Perintah Sortir dengan Perlindungan Debounce
      */
     async dispatchSortingCommand(params = {}) {
-      if (!this.activeAdapter) this._initAdapter();
-
-      // 1. Validasi Mode Pengoperasian: Dalam mode MANUAL, cegah trigger otomatis AI
-      if (this.operatingMode === OPERATING_MODES.MANUAL && !params.manualOverride) {
-        return {
-          ok: false,
-          suppressed: true,
-          reason: 'MANUAL_MODE_ACTIVE',
-          message: 'Mode MANUAL aktif. Perintah sortir otomatis dari kamera diabaikan demi keselamatan.'
-        };
-      }
-
-      // 2. Cegah pengiriman transaksi baru jika transaksi sebelumnya masih aktif
-      if (this.isTransactionActive()) {
-        return {
-          ok: false,
-          busy: true,
-          reason: 'DEVICE_BUSY',
-          activeTransactionId: this.currentTransaction ? this.currentTransaction.id : null,
-          message: 'Perangkat sedang memproses transaksi sortir sebelumnya.'
-        };
-      }
-
-      // 3. Resolusi kelas dan mekanisme
-      const rawInput = params.class_name || params.color || params;
-      const resolved = resolveClassAndMechanism(
-        rawInput,
-        this.legacyMechanismMap,
-        params.mode || params.mechanism || (this.config.defaultMechanism || 'servo')
-      );
-
-      if (!resolved.valid) {
-        return {
-          ok: false,
-          error: resolved.error,
-          reason: resolved.reason
-        };
-      }
-
-      // 4. Periksa cooldown debounce jika bukan paksaan (force / manualOverride)
+      const color = String(params.color || params || '').toLowerCase().trim();
+      const mode = params.mode || 'Servo';
       const now = Date.now();
-      const dedupeKey = resolved.class;
-      if (!params.force && !params.manualOverride && this.lastDispatchedCommand === dedupeKey && (now - this.lastDispatchedTime) < this.debounceMs) {
+
+      // Debounce: jika warna sama terdeteksi kembali dalam window debounceMs tanpa flag force
+      if (!params.force && color === this.lastDispatchedColor && (now - this.lastDispatchedTime) < this.config.debounceMs) {
         return {
           ok: false,
           suppressed: true,
-          class: dedupeKey,
-          reason: `Perintah duplikat untuk "${dedupeKey}" diabaikan dalam rentang debounce ${this.debounceMs}ms.`
+          reason: `Debounce aktif: deteksi "${color}" ditekan (${now - this.lastDispatchedTime}ms < ${this.config.debounceMs}ms)`
         };
       }
 
-      this.lastDispatchedCommand = dedupeKey;
+      this.lastDispatchedColor = color;
       this.lastDispatchedTime = now;
 
-      // 5. Jalankan eksekusi 2-tahap
-      return await this.executeTwoStageSort(resolved.color, resolved.mechanism, {
-        ...params,
-        detectedClass: resolved.class,
-        isMechanismAware: resolved.isMechanismAware
+      return await this.adapter.sendSortingCommand({
+        color,
+        mode,
+        commandId: params.commandId
       });
     }
 
-    /**
-     * Pengiriman perintah pemilahan manual dari antarmuka dashboard.
-     */
-    async sendManualSort(params = {}) {
-      return await this.dispatchSortingCommand({
-        ...params,
-        manualOverride: true,
-        source: OPERATING_MODES.MANUAL
-      });
-    }
-
-    /**
-     * Proxy backward-compatibility untuk objek legacy window.esp32Client.
-     * Mengarahkan pemanggilan kode lama (misal Teachable Machine atau manualAdd)
-     * ke DeviceConnectionManager terpadu secara transparan tanpa merusak flow.
-     */
+    // Proxy kompatibilitas agar pemanggilan lama tetap aman tanpa error
     createLegacyEsp32ClientProxy() {
-      const self = this;
       return {
-        get host() { return self.config.host; },
-        set host(v) { self.config.host = v; self.saveConfig({ host: v }); },
-        get simulationMode() { return self.config.simulationMode; },
-        set simulationMode(v) { self.setSimulation(v); },
-        get lastTelemetry() { return self.activeAdapter ? self.activeAdapter.lastTelemetry : null; },
-        get lastAck() { return self.activeAdapter ? self.activeAdapter.lastAck : null; },
-        get connectionStatus() { return self.activeAdapter ? self.activeAdapter.status : 'OFFLINE'; },
-        
-        configure: (opts) => {
-          if (opts.host) self.config.host = opts.host;
-          if (opts.simulationMode !== undefined) self.setSimulation(opts.simulationMode);
-          self.saveConfig();
-          return this;
-        },
-        setSimulation: (en) => self.setSimulation(en),
-        isSimulated: () => self.isSimulated(),
-        getStatus: () => {
-          const st = self.getStatus();
-          return {
-            online: st.online,
-            state: st.state,
-            host: self.config.host,
-            isSimulated: self.config.simulationMode,
-            deviceType: st.deviceType,
-            connectionType: st.connectionType,
-            rssi: (st.telemetry && (st.telemetry.wifiRssi || st.telemetry.rssi)) || (self.config.simulationMode ? -42 : null),
-            freeHeap: (st.telemetry && st.telemetry.freeHeap) || (self.config.simulationMode ? 218400 : null),
-            uptimeMs: (st.telemetry && st.telemetry.uptimeSec) ? (st.telemetry.uptimeSec * 1000) : 0,
-            currentMode: (st.telemetry && st.telemetry.mode) || 'Servo'
-          };
-        },
-        checkHealth: async () => {
-          return await self.connect();
-        },
-        sendSortingCommand: async (params) => {
-          return await self.dispatchSortingCommand(params);
-        },
-        sendModeCommand: async (mode) => {
-          return await self.dispatchModeCommand(mode);
-        },
-        sendEmergencyStop: async () => {
-          return await self.dispatchEmergencyStop();
-        },
-        getOperatingMode: () => self.getOperatingMode(),
-        setOperatingMode: (m) => self.setOperatingMode(m),
-        getLegacyMechanismMap: () => self.getLegacyMechanismMap(),
-        setLegacyMechanismMap: (map) => self.setLegacyMechanismMap(map),
-        sendManualSort: async (params) => self.sendManualSort(params),
-        onStatusChange: (fn) => self.onStatusChange(fn)
+        getStatus: () => ({ status: this.adapter.status, simulationMode: this.adapter.simulationMode }),
+        connect: () => this.connect(),
+        disconnect: () => this.disconnect(),
+        sendSortingCommand: (p) => this.dispatchSortingCommand(p),
+        sendEmergencyStop: () => this.dispatchEmergencyStop()
       };
     }
   }
 
-  // Explicit prototype assignment untuk menjaga integritas method di semua environment
-  if (typeof DeviceConnectionManager !== 'undefined') {
-    DeviceConnectionManager.prototype.getOperatingMode = DeviceConnectionManager.prototype.getOperatingMode || function () { return this.operatingMode || 'AUTO'; };
-    DeviceConnectionManager.prototype.setOperatingMode = DeviceConnectionManager.prototype.setOperatingMode || function (m) {
-      const mode = String(m || '').toUpperCase().trim();
-      this.operatingMode = mode;
-      return { ok: true, operatingMode: mode };
-    };
-  }
-
-  // Export module untuk Browser & Node.js
+  // =========================================================================
+  // 5. EKSPOR MODUL
+  // =========================================================================
   return {
     DEVICE_TYPES,
     CONNECTION_TYPES,
     CONNECTION_STATES,
     OPERATING_MODES,
-    TRANSACTION_STATES,
-    STATUS_CATEGORIES,
-    MECHANISM_TYPES,
-    CANONICAL_CLASSES,
-    CLASS_REGISTRY,
-    resolveClassAndMechanism,
-    classifyTransaction,
-    aggregateSortingDistribution,
+    VALID_COLORS,
+    VALID_MODES,
     NORDIC_UART_SERVICE_UUID,
-    NORDIC_UART_RX_UUID,
-    NORDIC_UART_TX_UUID,
-    BaseDeviceAdapter,
-    ESP32WiFiAdapter,
-    ESP32BLEAdapter,
+    NORDIC_UART_TX_CHARACTERISTIC_UUID,
+    NORDIC_UART_RX_CHARACTERISTIC_UUID,
     MicrobitBLEAdapter,
-    DeviceConnectionManager
+    DeviceConnectionManager,
+    aggregateSortingDistribution
   };
 });
