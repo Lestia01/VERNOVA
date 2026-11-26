@@ -419,7 +419,7 @@
       this.host = this._sanitizeHost(config.host || 'http://192.168.4.1');
       this.simulationMode = Boolean(config.simulationMode);
       this.status = this.simulationMode ? CONNECTION_STATES.SIMULATED : CONNECTION_STATES.DISCONNECTED;
-      this.timeoutMs = config.timeoutMs || 4000;
+      this.timeoutMs = config.timeoutMs || 6000;
       this.lastError = null;
       this.lastAck = null;
       this.lastTelemetry = null;
@@ -522,7 +522,7 @@
       } catch (err) {
         clearTimeout(timer);
         if (err.name === 'AbortError') {
-          throw new Error(`Timeout menghubungi ESP32 (${options.timeoutMs || this.timeoutMs}ms) di ${this.host}`);
+          throw new Error(`Timeout menghubungi ESP32 (${options.timeoutMs || this.timeoutMs}ms) di ${this.host}. Pastikan ESP32 aktif & satu Wi-Fi (atau gunakan SoftAP http://192.168.4.1).`);
         }
         throw err;
       }
@@ -718,19 +718,56 @@
       }
     }
 
-    async sendTestPulse() {
-      if (this.simulationMode) return { ok: true, simulated: true, status: 'PULSE_ACK' };
+    async sendTestPulse(options = {}) {
+      if (this.simulationMode) return { ok: true, simulated: true, status: 'PULSE_ACK', message: 'Test pulse simulasi OK' };
+      const timeoutMs = options.timeoutMs || this.timeoutMs;
+      let lastErr = null;
+
+      // 1. Coba POST /api/test
       try {
         const resp = await this._fetchWithTimeout(`${this.host}/api/test`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'test' })
+          body: JSON.stringify({ type: 'test' }),
+          timeoutMs
         });
-        return { ok: resp.ok, message: 'Test pulse acknowledged' };
-      } catch (err) {
-        this.lastError = err.message;
-        return { ok: false, error: err.message };
+        if (resp.ok) {
+          return { ok: true, message: 'Test pulse acknowledged' };
+        }
+      } catch (err1) {
+        lastErr = err1;
       }
+
+      // 2. Fallback: Coba GET /api/status jika firmware versi sebelumnya digunakan
+      try {
+        const respStatus = await this._fetchWithTimeout(`${this.host}/api/status`, {
+          method: 'GET',
+          timeoutMs: Math.min(timeoutMs, 4000)
+        });
+        if (respStatus.ok) {
+          const stJson = await respStatus.json().catch(() => ({}));
+          return { ok: true, message: 'ESP32 merespons status OK (/api/status)', telemetry: stJson };
+        }
+      } catch (err2) {
+        // Abaikan jika tetap gagal
+      }
+
+      // 3. Fallback: Coba GET /api/health
+      try {
+        const respHealth = await this._fetchWithTimeout(`${this.host}/api/health`, {
+          method: 'GET',
+          timeoutMs: Math.min(timeoutMs, 4000)
+        });
+        if (respHealth.ok) {
+          const hlJson = await respHealth.json().catch(() => ({}));
+          return { ok: true, message: 'ESP32 merespons health OK (/api/health)', telemetry: hlJson };
+        }
+      } catch (err3) {
+        // Abaikan
+      }
+
+      this.lastError = lastErr ? lastErr.message : 'ESP32 tidak merespons';
+      return { ok: false, error: this.lastError };
     }
   }
 

@@ -1759,11 +1759,34 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <label class="text-[11px] font-bold t-muted block mb-1">Alamat IP / Host ESP32:</label>
             <div class="flex items-center gap-2">
               <input type="text" id="esp32-host-input" value="http://192.168.4.1" placeholder="http://192.168.4.1" class="inp text-xs font-mono font-bold flex-1">
-              <button type="button" onclick="window.sendTestPulseCurrentDevice()" class="btn-ghost px-2.5 py-2 text-xs border font-bold flex items-center gap-1" title="Kirim Test Pulse Ping">
-                <i class="fas fa-wave-square text-xs"></i><span>Ping</span>
+              <button type="button" onclick="window.sendTestPulseCurrentDevice()" class="btn-ghost px-2.5 py-2 text-xs border font-bold flex items-center gap-1 hover:border-blue-500" title="Kirim Test Pulse Ping">
+                <i class="fas fa-wave-square text-xs text-indigo-500"></i><span>Ping / Test</span>
               </button>
             </div>
-            <span class="text-[10px] t-muted mt-1 block">Default Access Point: <code class="font-mono">http://192.168.4.1</code> atau masukkan IP router lokal ESP32 Anda.</span>
+            
+            <!-- Quick Presets -->
+            <div class="flex items-center gap-1.5 mt-2 flex-wrap">
+              <span class="text-[10px] t-muted">Pilihan Cepat:</span>
+              <button type="button" onclick="$('esp32-host-input').value='http://192.168.4.1';if(window.deviceManager)window.deviceManager.setHost('http://192.168.4.1');" class="text-[10px] px-2 py-0.5 rounded border border-indigo-400/40 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-bold hover:border-indigo-500 cursor-pointer">
+                Hotspot ESP32 (192.168.4.1)
+              </button>
+              <button type="button" onclick="$('esp32-host-input').value='http://172.25.15.108';if(window.deviceManager)window.deviceManager.setHost('http://172.25.15.108');" class="text-[10px] px-2 py-0.5 rounded border border-emerald-400/40 bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 font-bold hover:border-emerald-500 cursor-pointer">
+                IP Lab (172.25.15.108)
+              </button>
+            </div>
+
+            <!-- Petunjuk Mengatasi Timeout Wi-Fi -->
+            <div class="mt-2.5 p-2.5 rounded-xl border border-amber-300/40 bg-amber-50/60 dark:bg-amber-950/30 text-[11px] text-amber-900 dark:text-amber-200 space-y-1">
+              <p class="font-bold flex items-center gap-1.5 text-[11px]">
+                <i class="fas fa-triangle-exclamation text-amber-500"></i>
+                <span>Solusi Jika Terjadi Timeout / Gagal Menghubungi IP:</span>
+              </p>
+              <ul class="list-disc pl-4 space-y-0.5 text-[10px] opacity-90 leading-relaxed">
+                <li><strong>Hotspot ESP32 (Paling Stabil):</strong> Hubungkan Wi-Fi laptop langsung ke hotspot ESP32 <code>VERNOVA-ROBOT</code>, lalu gunakan <code>http://192.168.4.1</code>. Bebas dari blokir isolasi router.</li>
+                <li><strong>Wi-Fi Lab / Hotspot HP:</strong> Pada Wi-Fi instansi/sekolah sering aktif fitur <em>AP Client Isolation</em> yang memblokir laptop mengirim paket ke ESP32. Gunakan Personal Hotspot dari HP untuk menghubungkan laptop &amp; ESP32.</li>
+                <li><strong>Mode Simulasi:</strong> Jika sedang demonstrasi tanpa hardware menyala, aktifkan <em>Mode Simulasi Virtual</em> di bawah.</li>
+              </ul>
+            </div>
           </div>
 
           <div id="esp32-telemetry-box" class="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[10px] text-emerald-800 dark:text-emerald-200 hidden">
@@ -2407,11 +2430,18 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
   /* Test Pulse Handler */
   window.sendTestPulseCurrentDevice = async () => {
+    const isEsp = window.deviceManager?.config?.deviceType === 'ESP32';
+    if (isEsp) {
+      const hostInput = $('esp32-host-input');
+      if (hostInput && hostInput.value.trim()) {
+        window.deviceManager.setHost(hostInput.value.trim());
+      }
+    }
     showToast(state.lang === 'id' ? "Mengirim sinyal uji test pulse..." : "Sending test pulse...");
     try {
       const res = await window.deviceManager.sendTestPulse();
       if (res && res.ok) {
-        showToast(state.lang === 'id' ? "Perangkat merespons test pulse!" : "Test pulse acknowledged!");
+        showToast(state.lang === 'id' ? `Perangkat merespons! (${res.message || 'OK'})` : `Acknowledged: ${res.message || 'OK'}`);
         logActivity("fas fa-wave-square", "background:rgba(99,102,241,.15);color:#6366f1", "Test Pulse OK", window.deviceManager.config.deviceType);
       } else {
         showToast("Test pulse gagal: " + (res?.error || 'No response'));
