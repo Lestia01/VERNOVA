@@ -931,7 +931,10 @@
       }
 
       if (!this.isSupported()) {
-        const errMsg = 'Web Bluetooth API tidak didukung di browser ini. Gunakan Google Chrome atau Microsoft Edge melalui HTTPS atau localhost.';
+        const isFile = typeof window !== 'undefined' && window.location && window.location.protocol === 'file:';
+        const errMsg = isFile
+          ? 'Web Bluetooth API tidak dapat berjalan pada file:/// lokal. Buka website via http://localhost atau aktifkan Mode Simulasi Virtual.'
+          : 'Web Bluetooth API tidak didukung di browser ini. Gunakan Google Chrome atau Microsoft Edge melalui HTTPS atau localhost.';
         this.lastError = errMsg;
         this._notify(CONNECTION_STATES.ERROR, errMsg);
         return { ok: false, error: errMsg, unsupported: true };
@@ -939,14 +942,25 @@
 
       try {
         this._notify(CONNECTION_STATES.CONNECTING, 'Memindai perangkat ESP32 Bluetooth BLE...');
-        this.device = await navigator.bluetooth.requestDevice({
-          filters: [
-            { namePrefix: 'VERNOVA' },
-            { namePrefix: 'ESP32' },
-            { namePrefix: 'VERNOVA-ESP32' }
-          ],
-          optionalServices: [NORDIC_UART_SERVICE_UUID]
-        });
+        try {
+          this.device = await navigator.bluetooth.requestDevice({
+            filters: [
+              { services: [NORDIC_UART_SERVICE_UUID] },
+              { namePrefix: 'VERNOVA' },
+              { namePrefix: 'ESP32' },
+              { namePrefix: 'VERNOVA-ESP32' }
+            ],
+            optionalServices: [NORDIC_UART_SERVICE_UUID]
+          });
+        } catch (scanErr) {
+          if (scanErr.name === 'NotFoundError') {
+            throw scanErr;
+          }
+          this.device = await navigator.bluetooth.requestDevice({
+            acceptAllDevices: true,
+            optionalServices: [NORDIC_UART_SERVICE_UUID]
+          });
+        }
 
         this.device.addEventListener('gattserverdisconnected', () => {
           this._notify(CONNECTION_STATES.DISCONNECTED, 'Koneksi ESP32 Bluetooth BLE terputus.');

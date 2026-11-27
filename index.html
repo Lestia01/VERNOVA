@@ -1764,14 +1764,22 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
       <!-- Konfigurasi micro:bit (BLE) -->
       <div id="sec-config-microbit" class="space-y-3 mb-4 text-xs">
-        <div class="p-3 rounded-xl border bg-slate-50 dark:bg-slate-900/50 space-y-2" style="border-color:var(--border)">
+        <div class="p-3 rounded-xl border bg-slate-50 dark:bg-slate-900/50 space-y-2.5" style="border-color:var(--border)">
           <div class="flex items-center justify-between">
             <span class="font-bold">Status micro:bit:</span>
             <span id="mbit-modal-status" class="pill gray">OFFLINE</span>
           </div>
-          <p class="text-[11px] t-muted">
+          <p class="text-[11px] t-muted leading-relaxed">
             Berkomunikasi via Nordic UART Service (UUID: <code class="font-mono text-[10px]">6e400001-...</code>). Buka Google Chrome/Edge dan pastikan Bluetooth PC aktif.
           </p>
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+            <button type="button" onclick="window.connectCurrentDevice()" class="btn-primary flex-1 py-2 text-xs font-bold flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-md cursor-pointer">
+              <i class="fab fa-bluetooth-b"></i><span>Hubungkan BBC micro:bit</span>
+            </button>
+            <button type="button" onclick="window.sendTestPulseCurrentDevice()" class="btn-ghost px-3 py-2 text-xs border font-bold flex items-center justify-center gap-1 hover:border-blue-500 cursor-pointer" title="Kirim Test Pulse BLE">
+              <i class="fas fa-wave-square text-xs text-blue-500"></i><span>Test Pulse</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1786,8 +1794,8 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <label class="text-[11px] font-bold t-muted block mb-1">Alamat IP / Host ESP32:</label>
             <div class="flex items-center gap-2">
               <input type="text" id="esp32-host-input" value="http://172.25.15.108" placeholder="http://172.25.15.108" oninput="if(window.deviceManager)window.deviceManager.setHost(this.value.trim())" onchange="if(window.deviceManager)window.deviceManager.setHost(this.value.trim())" class="inp text-xs font-mono font-bold flex-1">
-              <button type="button" onclick="window.sendTestPulseCurrentDevice()" class="btn-ghost px-2.5 py-2 text-xs border font-bold flex items-center gap-1 hover:border-blue-500" title="Kirim Test Pulse Ping">
-                <i class="fas fa-wave-square text-xs text-indigo-500"></i><span>Ping / Test</span>
+              <button type="button" onclick="window.sendTestPulseCurrentDevice()" class="btn-ghost px-2.5 py-2 text-xs border font-bold flex items-center gap-1 hover:border-emerald-500 cursor-pointer" title="Kirim Test Pulse Ping">
+                <i class="fas fa-wave-square text-xs text-emerald-500"></i><span>Ping Host</span>
               </button>
             </div>
             
@@ -1799,6 +1807,13 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
               </button>
               <button type="button" onclick="window.applyHostPreset('http://192.168.4.1')" class="text-[10px] px-2 py-0.5 rounded border border-indigo-400/40 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-bold hover:border-indigo-500 cursor-pointer">
                 SoftAP Mandiri (192.168.4.1)
+              </button>
+            </div>
+
+            <!-- Tombol Langsung Hubungkan ESP32 Wi-Fi -->
+            <div class="pt-2">
+              <button type="button" onclick="window.connectCurrentDevice()" class="btn-primary w-full py-2 text-xs font-bold flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-md cursor-pointer">
+                <i class="fas fa-wifi"></i><span>Hubungkan ESP32 (Wi-Fi)</span>
               </button>
             </div>
 
@@ -1831,11 +1846,14 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             <span id="esp32-ble-modal-status" class="pill gray">OFFLINE</span>
           </div>
           <p class="text-[11px] t-muted leading-relaxed">
-            Berkomunikasi via Nordic UART Service GATT (UUID: <code class="font-mono text-[10px]">6e400001-...</code>) dengan format pesan identik micro:bit. Pastikan Bluetooth PC aktif dan izin Web Bluetooth diberikan.
+            Berkomunikasi via Nordic UART Service GATT (UUID: <code class="font-mono text-[10px]">6e400001-...</code>) dengan format pesan identik micro:bit. Pastikan Bluetooth PC aktif dan peramban Google Chrome atau Edge digunakan.
           </p>
-          <div class="flex items-center gap-2 pt-1">
-            <button type="button" onclick="window.sendTestPulseCurrentDevice()" class="btn-ghost px-2.5 py-1.5 text-xs border font-bold flex items-center gap-1 hover:border-indigo-500" title="Kirim Test Pulse BLE">
-              <i class="fas fa-wave-square text-xs text-indigo-500"></i><span>Ping / Test Pulse BLE</span>
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+            <button type="button" id="btn-esp32-ble-connect" onclick="window.connectCurrentDevice()" class="btn-primary flex-1 py-2 text-xs font-bold flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white shadow-md cursor-pointer">
+              <i class="fab fa-bluetooth-b"></i><span>Hubungkan ESP32 (Bluetooth BLE)</span>
+            </button>
+            <button type="button" onclick="window.sendTestPulseCurrentDevice()" class="btn-ghost px-3 py-2 text-xs border font-bold flex items-center justify-center gap-1 hover:border-indigo-500 cursor-pointer" title="Kirim Test Pulse BLE">
+              <i class="fas fa-wave-square text-xs text-indigo-500"></i><span>Test Pulse</span>
             </button>
           </div>
         </div>
@@ -1858,8 +1876,8 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         <button type="button" onclick="window.reconnectCurrentDevice();" class="btn-ghost px-3 py-2 text-xs font-bold text-blue-600 dark:text-blue-400">
           <i class="fas fa-arrows-rotate mr-1"></i><span>Reconnect</span>
         </button>
-        <button type="button" onclick="window.connectCurrentDevice();" class="btn-primary px-4 py-2 text-xs font-bold flex items-center gap-1.5">
-          <i class="fas fa-plug"></i><span>Hubungkan Perangkat</span>
+        <button type="button" id="btn-modal-connect-main" onclick="window.connectCurrentDevice();" class="btn-primary px-4 py-2 text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+          <i class="fas fa-plug"></i><span id="btn-modal-connect-label">Hubungkan Perangkat</span>
         </button>
       </div>
     </div>
@@ -2406,8 +2424,8 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     const secEspWifi = $('sec-config-esp32');
     const secEspBle = $('sec-config-esp32-ble');
 
-    const activeCardClass = 'device-opt-card p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
-    const inactiveCardClass = 'device-opt-card p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100';
+    const activeCardClass = 'device-opt-card text-left p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20 w-full focus:outline-none';
+    const inactiveCardClass = 'device-opt-card text-left p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100 w-full focus:outline-none';
 
     if (cardMbit) cardMbit.className = isMbit ? activeCardClass : inactiveCardClass;
     if (cardEspWifi) cardEspWifi.className = isEspWifi ? activeCardClass : inactiveCardClass;
@@ -2416,6 +2434,13 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     if (secMbit) secMbit.classList.toggle('hidden', !isMbit);
     if (secEspWifi) secEspWifi.classList.toggle('hidden', !isEspWifi);
     if (secEspBle) secEspBle.classList.toggle('hidden', !isEspBle);
+
+    const modalConnLabel = $('btn-modal-connect-label');
+    if (modalConnLabel) {
+      modalConnLabel.innerText = isEspBle 
+        ? 'Hubungkan ESP32 (Bluetooth BLE)' 
+        : (isEspWifi ? 'Hubungkan ESP32 (Wi-Fi)' : 'Hubungkan BBC micro:bit');
+    }
 
     // 5. Update Status Indicators inside Modal
     const mbitStatus = $('mbit-modal-status');
