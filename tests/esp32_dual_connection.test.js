@@ -172,6 +172,8 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     const yoloRes = await manager.dispatchSortingCommand(yoloDetection);
     assert.equal(yoloRes.ok, true);
     assert.equal(yoloRes.color, 'merah');
+    assert.equal(yoloRes.mode, 'Arm');
+    assert.equal(yoloRes.command, 'merah arm');
     assert.equal(yoloRes.executionStatus, 'simulated_esp32_wifi');
 
     // Ganti perangkat ke ESP32 BLE
@@ -180,7 +182,23 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     const bleRes = await manager.dispatchSortingCommand(bleDetection);
     assert.equal(bleRes.ok, true);
     assert.equal(bleRes.color, 'biru');
+    assert.equal(bleRes.mode, 'Servo');
+    assert.equal(bleRes.command, 'biru servo');
     assert.equal(bleRes.executionStatus, 'simulated_esp32_ble');
+
+    // Uji manual sort dengan mechanism: 'arm' pada ESP32 BLE
+    const manualArmRes = await manager.sendManualSort({ color: 'merah', mechanism: 'arm' });
+    assert.equal(manualArmRes.ok, true);
+    assert.equal(manualArmRes.color, 'merah');
+    assert.equal(manualArmRes.mode, 'Arm');
+    assert.equal(manualArmRes.command, 'merah arm');
+
+    // Uji manual sort dengan mechanism: 'servo' pada ESP32 BLE
+    const manualServoRes = await manager.sendManualSort({ color: 'merah', mechanism: 'servo' });
+    assert.equal(manualServoRes.ok, true);
+    assert.equal(manualServoRes.color, 'merah');
+    assert.equal(manualServoRes.mode, 'Servo');
+    assert.equal(manualServoRes.command, 'merah servo');
   });
 
   // 8. Perpindahan adapter tidak menghasilkan perintah ganda & graceful disconnect

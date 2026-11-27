@@ -633,13 +633,16 @@
         throw new Error(`Warna tidak valid: "${params.color}". Harus salah satu dari: ${VALID_COLORS.join(', ')}`);
       }
 
-      const mode = params.mode && VALID_MODES.includes(params.mode) ? params.mode : 'Servo';
+      const rawMode = params.mode || params.mechanism || 'Servo';
+      const mode = String(rawMode).toLowerCase().includes('arm') ? 'Arm' : 'Servo';
+      const modeStr = mode.toLowerCase();
       const commandId = params.commandId || `CMD_ESP_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const startTime = Date.now();
+      const fullCmd = `${color} ${modeStr}`;
 
       // Kasus A: Simulasi Virtual
       if (this.simulationMode) {
-        this._notify(CONNECTION_STATES.BUSY, `[ESP32 Simulasi] Sortir ${color} (${mode})`);
+        this._notify(CONNECTION_STATES.BUSY, `[ESP32 Simulasi] Sortir ${fullCmd}`);
         await new Promise(r => setTimeout(r, 200));
         const durationMs = Date.now() - startTime;
         const result = {
@@ -648,24 +651,26 @@
           commandId,
           color,
           mode,
+          command: fullCmd,
           status: 'COMPLETED',
           executionStatus: 'simulated_esp32_wifi',
           durationMs,
-          message: `Simulasi ESP32 ${color} sukses.`
+          message: `Simulasi ESP32 ${fullCmd} sukses.`
         };
         this.lastAck = result;
-        this._notify(CONNECTION_STATES.SIMULATED, `[ESP32 Simulasi] Selesai ${color} (${mode})`);
+        this._notify(CONNECTION_STATES.SIMULATED, `[ESP32 Simulasi] Selesai ${fullCmd}`);
         return result;
       }
 
       // Kasus B: Hardware Nyata via HTTP POST
       const sortUrl = this._buildUrl('/api/sort');
-      this._notify(CONNECTION_STATES.BUSY, `Mengirim ke ESP32: "${color}" (${mode})...`);
+      this._notify(CONNECTION_STATES.BUSY, `Mengirim ke ESP32: "${fullCmd}"...`);
       try {
         const payload = {
           type: 'sort',
           color,
-          mode: mode.toLowerCase(),
+          mode: modeStr,
+          command: fullCmd,
           objectType: params.objectType || 'CYLINDER_CAP',
           commandId
         };
@@ -1118,13 +1123,16 @@
         throw new Error(`Warna tidak valid: "${params.color}". Harus salah satu dari: ${VALID_COLORS.join(', ')}`);
       }
 
-      const mode = params.mode && VALID_MODES.includes(params.mode) ? params.mode : 'Servo';
+      const rawMode = params.mode || params.mechanism || 'Servo';
+      const mode = String(rawMode).toLowerCase().includes('arm') ? 'Arm' : 'Servo';
+      const modeStr = mode.toLowerCase();
       const commandId = params.commandId || `CMD_ESP_BLE_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const startTime = Date.now();
+      const fullCmd = `${color} ${modeStr}`;
 
       // Kasus A: Simulasi Virtual
       if (this.simulationMode) {
-        this._notify(CONNECTION_STATES.BUSY, `[ESP32 BLE Simulasi] Sortir ${color} (${mode})`);
+        this._notify(CONNECTION_STATES.BUSY, `[ESP32 BLE Simulasi] Sortir ${fullCmd}`);
         await new Promise(r => setTimeout(r, 200));
         const durationMs = Date.now() - startTime;
         const result = {
@@ -1133,32 +1141,34 @@
           commandId,
           color,
           mode,
+          command: fullCmd,
           status: 'COMPLETED',
           executionStatus: 'simulated_esp32_ble',
           durationMs,
-          message: `Simulasi ESP32 BLE ${color} sukses.`
+          message: `Simulasi ESP32 BLE ${fullCmd} sukses.`
         };
         this.lastAck = result;
-        this._notify(CONNECTION_STATES.SIMULATED, `[ESP32 BLE Simulasi] Selesai ${color} (${mode})`);
+        this._notify(CONNECTION_STATES.SIMULATED, `[ESP32 BLE Simulasi] Selesai ${fullCmd}`);
         return result;
       }
 
-      // Kasus B: Hardware Nyata via BLE GATT UART (Format teks identik micro:bit)
-      this._notify(CONNECTION_STATES.BUSY, `Mengirim ke ESP32 BLE: "${color}" (${mode})...`);
+      // Kasus B: Hardware Nyata via BLE GATT UART (Mengirim data warna dan mekanisme: misal "merah servo" / "merah arm")
+      this._notify(CONNECTION_STATES.BUSY, `Mengirim ke ESP32 BLE: "${fullCmd}"...`);
       try {
-        await this._writeBLECommand(color);
+        await this._writeBLECommand(fullCmd);
         const durationMs = Date.now() - startTime;
         const result = {
           ok: true,
           commandId,
           color,
           mode,
+          command: fullCmd,
           status: 'COMMAND_RECEIVED',
           executionStatus: 'confirmed_esp32_ble',
           durationMs
         };
         this.lastAck = result;
-        this._notify(CONNECTION_STATES.CONNECTED, `ESP32 BLE sortir ${color} terkirim (${durationMs}ms)`);
+        this._notify(CONNECTION_STATES.CONNECTED, `ESP32 BLE sortir ${fullCmd} terkirim (${durationMs}ms)`);
         return result;
       } catch (err) {
         const durationMs = Date.now() - startTime;
@@ -1469,7 +1479,8 @@
      */
     async dispatchSortingCommand(params = {}) {
       const color = String(params.color || params || '').toLowerCase().trim();
-      const mode = params.mode || 'Servo';
+      const rawMode = params.mode || params.mechanism || 'Servo';
+      const mode = String(rawMode).toLowerCase().includes('arm') ? 'Arm' : 'Servo';
       const now = Date.now();
 
       // Debounce: jika warna sama terdeteksi kembali dalam window debounceMs tanpa flag force

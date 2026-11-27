@@ -58,9 +58,12 @@ Seluruh perintah dikirim dalam bentuk string teks berakhiran karakter newline de
 
 | Perintah | Deskripsi | Aksi Perangkat Keras |
 | :--- | :--- | :--- |
-| `kuning\n` | Sortir objek warna kuning | Servo 1 Flap bergerak ke 40°, motor conveyor aktif |
-| `biru\n` | Sortir objek warna biru | Servo 1 Flap bergerak ke 90°, motor conveyor aktif |
-| `merah\n` | Sortir objek warna merah | Servo 1 Flap bergerak ke 140°, motor conveyor aktif |
+| `merah servo\n` / `merah\n` | Sortir merah dengan mekanisme Servo | Servo 1 Flap bergerak ke 140°, motor conveyor aktif |
+| `merah arm\n` | Sortir merah dengan mekanisme Arm | Servo 1 Flap bergerak ke 140°, motor conveyor aktif, Servo 2 Arm mendorong |
+| `kuning servo\n` / `kuning\n` | Sortir kuning dengan mekanisme Servo | Servo 1 Flap bergerak ke 40°, motor conveyor aktif |
+| `kuning arm\n` | Sortir kuning dengan mekanisme Arm | Servo 1 Flap bergerak ke 40°, motor conveyor aktif, Servo 2 Arm mendorong |
+| `biru servo\n` / `biru\n` | Sortir biru dengan mekanisme Servo | Servo 1 Flap bergerak ke 90°, motor conveyor aktif |
+| `biru arm\n` | Sortir biru dengan mekanisme Arm | Servo 1 Flap bergerak ke 90°, motor conveyor aktif, Servo 2 Arm mendorong |
 | `servo\n` | Ganti mode aktuator ke Servo | Aktuator pemilah jalur (Gate/Flap) |
 | `arm\n` | Ganti mode aktuator ke Arm | Aktuator dorong lengan robot (Servo 2) |
 | `stop\n` | Emergency Stop | Motor ENA/IN LOW, kedua servo kembali ke posisi aman |

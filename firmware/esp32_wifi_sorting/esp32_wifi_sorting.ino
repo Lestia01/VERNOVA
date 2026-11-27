@@ -317,6 +317,16 @@ void handleSort() {
   String commandId = "CMD_" + String(millis());
 
   // Parser JSON sederhana
+  int cmdIdx = body.indexOf("\"command\":");
+  if (cmdIdx != -1) {
+    int start = body.indexOf("\"", cmdIdx + 10) + 1;
+    int end = body.indexOf("\"", start);
+    if (start > 0 && end > start) {
+      String fullCmd = body.substring(start, end);
+      Serial.println("[HTTP POST /api/sort] Command: " + fullCmd);
+    }
+  }
+
   int cIdx = body.indexOf("\"color\":");
   if (cIdx != -1) {
     int start = body.indexOf("\"", cIdx + 8) + 1;
@@ -335,6 +345,17 @@ void handleSort() {
     int end = body.indexOf("\"", start);
     if (start > 0 && end > start) commandId = body.substring(start, end);
   }
+
+  // Fallback parsing jika payload dikirim format teks
+  if (color == "") {
+    if (body.indexOf("kuning") != -1) color = "kuning";
+    else if (body.indexOf("biru") != -1) color = "biru";
+    else if (body.indexOf("merah") != -1) color = "merah";
+  }
+  if (body.indexOf("arm") != -1) mode = "arm";
+  else if (body.indexOf("servo") != -1) mode = "servo";
+
+  Serial.println("[HTTP POST /api/sort] Color: " + color + ", Mode: " + mode + " -> (" + color + " " + mode + ")");
 
   bool ok = executeSorting(color, mode, commandId, "Wi-Fi HTTP");
   if (!ok) {
@@ -397,13 +418,25 @@ class CharCallbacks: public BLECharacteristicCallbacks {
 
     Serial.println("[BLE RX] " + rx);
 
-    // Format Perintah Identik micro:bit MakeCode!
-    if (rx == "kuning" || rx == "sort:kuning" || rx.indexOf("kuning") != -1) {
-      executeSorting("kuning", currentMode, "CMD_BLE_" + String(millis()), "BLE UART");
-    } else if (rx == "biru" || rx == "sort:biru" || rx.indexOf("biru") != -1) {
-      executeSorting("biru", currentMode, "CMD_BLE_" + String(millis()), "BLE UART");
-    } else if (rx == "merah" || rx == "sort:merah" || rx.indexOf("merah") != -1) {
-      executeSorting("merah", currentMode, "CMD_BLE_" + String(millis()), "BLE UART");
+    // 1. Ekstrak Warna (merah, kuning, biru)
+    String targetColor = "";
+    if (rx.indexOf("kuning") != -1) targetColor = "kuning";
+    else if (rx.indexOf("biru") != -1) targetColor = "biru";
+    else if (rx.indexOf("merah") != -1) targetColor = "merah";
+
+    // 2. Ekstrak Mekanisme/Mode (servo atau arm)
+    String targetMode = currentMode;
+    if (rx.indexOf("arm") != -1) {
+      targetMode = "arm";
+      currentMode = "arm";
+    } else if (rx.indexOf("servo") != -1) {
+      targetMode = "servo";
+      currentMode = "servo";
+    }
+
+    // 3. Eksekusi Berdasarkan Perintah
+    if (targetColor != "") {
+      executeSorting(targetColor, targetMode, "CMD_BLE_" + String(millis()), "BLE UART");
     } else if (rx == "arm" || rx == "mech:arm") {
       executeModeCommand("arm");
     } else if (rx == "servo" || rx == "mech:servo") {

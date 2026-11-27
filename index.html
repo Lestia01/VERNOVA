@@ -2788,14 +2788,15 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   window.sendManualSortCommand = async () => {
     const color = $('man-color-select')?.value || 'merah';
     const mechanism = $('man-mech-select')?.value || 'servo';
+    const mode = String(mechanism).toLowerCase().includes('arm') ? 'Arm' : 'Servo';
     const btnSend = $('btn-manual-send');
     if (btnSend) btnSend.disabled = true;
 
-    showToast(`Mengirim perintah manual: ${color.toUpperCase()} (${mechanism.toUpperCase()})...`);
-    logActivity("fas fa-paper-plane", "background:rgba(59,130,246,.15);color:#3b82f6", "Manual Sort Sent", `${color} -> ${mechanism}`);
+    showToast(`Mengirim perintah manual: ${color.toUpperCase()} (${mode.toUpperCase()})...`);
+    logActivity("fas fa-paper-plane", "background:rgba(59,130,246,.15);color:#3b82f6", "Manual Sort Sent", `${color} -> ${mode}`);
 
     try {
-      const res = await window.deviceManager.sendManualSort({ color, mechanism });
+      const res = await window.deviceManager.sendManualSort({ color, mode, mechanism });
       if (res && res.ok) {
         showToast(`Sukses sortir manual: ${color} (${mechanism})`);
         triggerSortAction(color, res);
