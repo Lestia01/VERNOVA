@@ -771,7 +771,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
               </button>
 
               <!-- Pilihan 2: ESP32 (Wi-Fi) -->
-              <button type="button" onclick="event.stopPropagation();window.selectAndConnectDevice('ESP32')" class="w-full text-left p-2.5 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border border-transparent hover:border-emerald-400/30 flex items-center gap-3 transition-all cursor-pointer group focus:outline-none">
+              <button type="button" onclick="event.stopPropagation();window.selectAndConnectDevice('ESP32_WIFI')" class="w-full text-left p-2.5 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border border-transparent hover:border-emerald-400/30 flex items-center gap-3 transition-all mb-1 cursor-pointer group focus:outline-none">
                 <div class="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 text-base shadow-sm group-hover:scale-105 transition-transform">
                   <i class="fas fa-wifi"></i>
                 </div>
@@ -781,6 +781,20 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
                     <span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold">Wi-Fi</span>
                   </div>
                   <p class="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">Koneksi HTTP REST via IP lokal</p>
+                </div>
+              </button>
+
+              <!-- Pilihan 3: ESP32 (Bluetooth BLE) -->
+              <button type="button" onclick="event.stopPropagation();window.selectAndConnectDevice('ESP32_BLE')" class="w-full text-left p-2.5 rounded-xl hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-transparent hover:border-indigo-400/30 flex items-center gap-3 transition-all cursor-pointer group focus:outline-none">
+                <div class="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 text-base shadow-sm group-hover:scale-105 transition-transform">
+                  <i class="fab fa-bluetooth-b"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center justify-between">
+                    <span>ESP32 DevKit</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-bold">Bluetooth BLE</span>
+                  </div>
+                  <p class="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">Koneksi BLE (MakeCode/NUS UART)</p>
                 </div>
               </button>
             </div>
@@ -1716,22 +1730,30 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         <button onclick="window.closeModal('microbit-modal')" class="icon-btn" aria-label="Tutup"><i class="fas fa-xmark text-xs"></i></button>
       </div>
 
-      <!-- Selector 2 Perangkat (Radio Cards) -->
-      <div class="grid grid-cols-2 gap-2.5 mb-4">
+      <!-- Selector 3 Perangkat & Koneksi (Radio Cards) -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-4">
         <button type="button" id="opt-card-microbit" onclick="window.onSelectDeviceType('MICROBIT')" class="device-opt-card text-left p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20 w-full focus:outline-none">
-          <div class="flex items-center gap-2 mb-1">
+          <div class="flex items-center gap-1.5 mb-1">
             <i class="fab fa-bluetooth-b text-blue-600 text-sm"></i>
-            <span class="font-black text-xs">BBC micro:bit</span>
+            <span class="font-black text-xs">micro:bit</span>
           </div>
-          <p class="text-[10px] t-muted">Bluetooth Low Energy (MakeCode UART)</p>
+          <p class="text-[10px] t-muted">Bluetooth BLE (Nordic UART)</p>
         </button>
 
         <button type="button" id="opt-card-esp32" onclick="window.onSelectDeviceType('ESP32')" class="device-opt-card text-left p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100 w-full focus:outline-none">
-          <div class="flex items-center gap-2 mb-1">
-            <i class="fas fa-wifi text-indigo-600 text-sm"></i>
-            <span class="font-black text-xs">ESP32 DevKit V1</span>
+          <div class="flex items-center gap-1.5 mb-1">
+            <i class="fas fa-wifi text-emerald-600 text-sm"></i>
+            <span class="font-black text-xs">ESP32 Wi-Fi</span>
           </div>
-          <p class="text-[10px] t-muted">Wi-Fi Local Network (HTTP REST API)</p>
+          <p class="text-[10px] t-muted">Jaringan IP / HTTP REST API</p>
+        </button>
+
+        <button type="button" id="opt-card-esp32-ble" onclick="window.onSelectDeviceType('ESP32_BLE')" class="device-opt-card text-left p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100 w-full focus:outline-none">
+          <div class="flex items-center gap-1.5 mb-1">
+            <i class="fab fa-bluetooth-b text-indigo-600 text-sm"></i>
+            <span class="font-black text-xs">ESP32 BLE</span>
+          </div>
+          <p class="text-[10px] t-muted">Bluetooth BLE (Nordic UART)</p>
         </button>
       </div>
 
@@ -1792,6 +1814,24 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
           <div id="esp32-telemetry-box" class="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[10px] text-emerald-800 dark:text-emerald-200 hidden">
             <div class="flex items-center gap-1.5 font-bold mb-0.5"><i class="fas fa-circle-check text-emerald-600"></i><span>Telemetri ESP32 Aktif:</span></div>
             <div id="esp32-telemetry-text" class="font-mono text-[9px] truncate">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Konfigurasi ESP32 (Bluetooth BLE) -->
+      <div id="sec-config-esp32-ble" class="space-y-3 mb-4 text-xs hidden">
+        <div class="p-3 rounded-xl border bg-slate-50 dark:bg-slate-900/50 space-y-2.5" style="border-color:var(--border)">
+          <div class="flex items-center justify-between">
+            <span class="font-bold">Status ESP32 Bluetooth BLE:</span>
+            <span id="esp32-ble-modal-status" class="pill gray">OFFLINE</span>
+          </div>
+          <p class="text-[11px] t-muted leading-relaxed">
+            Berkomunikasi via Nordic UART Service GATT (UUID: <code class="font-mono text-[10px]">6e400001-...</code>) dengan format pesan identik micro:bit. Pastikan Bluetooth PC aktif dan izin Web Bluetooth diberikan.
+          </p>
+          <div class="flex items-center gap-2 pt-1">
+            <button type="button" onclick="window.sendTestPulseCurrentDevice()" class="btn-ghost px-2.5 py-1.5 text-xs border font-bold flex items-center gap-1 hover:border-indigo-500" title="Kirim Test Pulse BLE">
+              <i class="fas fa-wave-square text-xs text-indigo-500"></i><span>Ping / Test Pulse BLE</span>
+            </button>
           </div>
         </div>
       </div>
@@ -2275,11 +2315,14 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     const txDevice = $('tx-status-device');
     const manDevice = $('man-device-display');
 
-    const cfg = window.deviceManager ? window.deviceManager.config : { deviceType: 'MICROBIT' };
+    const cfg = window.deviceManager ? window.deviceManager.config : { deviceType: 'MICROBIT', connectionType: 'BLE' };
     const devType = cfg.deviceType || 'MICROBIT';
-    const isEsp = devType === 'ESP32';
-    const devName = isEsp ? 'ESP32' : 'micro:bit';
-    const connShort = isEsp ? 'Wi-Fi' : 'BLE';
+    const connType = cfg.connectionType || (devType === 'ESP32' ? 'WIFI' : 'BLE');
+    const isMbit = devType === 'MICROBIT';
+    const isEspWifi = devType === 'ESP32' && connType === 'WIFI';
+    const isEspBle = devType === 'ESP32_BLE' || (devType === 'ESP32' && connType === 'BLE');
+    const devName = isMbit ? 'micro:bit' : (isEspWifi ? 'ESP32 (Wi-Fi)' : 'ESP32 (BLE)');
+    const connShort = isEspWifi ? 'Wi-Fi' : 'BLE';
 
     const st = (ev && ev.status) || (window.deviceManager && typeof window.deviceManager.getStatus === 'function' ? window.deviceManager.getStatus().state : 'DISCONNECTED');
     const isSim = window.deviceManager && typeof window.deviceManager.isSimulated === 'function' ? window.deviceManager.isSimulated() : false;
@@ -2287,7 +2330,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     // 1. Update Topbar pill
     if (pill) {
       if (st === 'CONNECTED' || st === 'READY') {
-        setPill(pill, 'blue', `${devName} (${connShort}): ON`);
+        setPill(pill, 'blue', `${devName}: ON`);
       } else if (st === 'BUSY') {
         setPill(pill, 'warn', `${devName}: BUSY`);
       } else if (st === 'SIMULATED' || isSim) {
@@ -2321,19 +2364,51 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
     // 3. Update Live Transaction & Manual Panel Displays
     if (txDevice) {
-      txDevice.className = isEsp ? 'pill indigo font-bold' : 'pill blue font-bold';
-      txDevice.innerHTML = isEsp ? '<i class="fas fa-wifi"></i> ESP32 Wi-Fi Robot' : '<i class="fab fa-bluetooth-b"></i> micro:bit Robot';
+      if (isEspWifi) {
+        txDevice.className = 'pill emerald font-bold';
+        txDevice.innerHTML = '<i class="fas fa-wifi"></i> ESP32 Wi-Fi Robot';
+      } else if (isEspBle) {
+        txDevice.className = 'pill indigo font-bold';
+        txDevice.innerHTML = '<i class="fab fa-bluetooth-b"></i> ESP32 BLE Robot';
+      } else {
+        txDevice.className = 'pill blue font-bold';
+        txDevice.innerHTML = '<i class="fab fa-bluetooth-b"></i> micro:bit Robot';
+      }
     }
 
     if (manDevice) {
-      manDevice.innerHTML = isEsp 
-        ? '<div class="flex items-center gap-2"><i class="fas fa-wifi text-indigo-500"></i><span>ESP32 DevKit V1 (Wi-Fi REST)</span></div><span class="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1"><i class="fas fa-chevron-right text-[9px]"></i></span>'
-        : '<div class="flex items-center gap-2"><i class="fab fa-bluetooth-b text-indigo-500"></i><span>BBC micro:bit (Bluetooth UART)</span></div><span class="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1"><i class="fas fa-chevron-right text-[9px]"></i></span>';
+      if (isEspWifi) {
+        manDevice.innerHTML = '<div class="flex items-center gap-2"><i class="fas fa-wifi text-emerald-500"></i><span>ESP32 DevKit V1 (Wi-Fi REST)</span></div><span class="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1"><i class="fas fa-chevron-right text-[9px]"></i></span>';
+      } else if (isEspBle) {
+        manDevice.innerHTML = '<div class="flex items-center gap-2"><i class="fab fa-bluetooth-b text-indigo-500"></i><span>ESP32 DevKit V1 (Bluetooth BLE UART)</span></div><span class="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1"><i class="fas fa-chevron-right text-[9px]"></i></span>';
+      } else {
+        manDevice.innerHTML = '<div class="flex items-center gap-2"><i class="fab fa-bluetooth-b text-blue-500"></i><span>BBC micro:bit (Bluetooth UART)</span></div><span class="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1"><i class="fas fa-chevron-right text-[9px]"></i></span>';
+      }
     }
 
-    // 4. Update Modal Elements
+    // 4. Update Modal Selection Cards
+    const cardMbit = $('opt-card-microbit');
+    const cardEspWifi = $('opt-card-esp32');
+    const cardEspBle = $('opt-card-esp32-ble');
+    const secMbit = $('sec-config-microbit');
+    const secEspWifi = $('sec-config-esp32');
+    const secEspBle = $('sec-config-esp32-ble');
+
+    const activeCardClass = 'device-opt-card p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
+    const inactiveCardClass = 'device-opt-card p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100';
+
+    if (cardMbit) cardMbit.className = isMbit ? activeCardClass : inactiveCardClass;
+    if (cardEspWifi) cardEspWifi.className = isEspWifi ? activeCardClass : inactiveCardClass;
+    if (cardEspBle) cardEspBle.className = isEspBle ? activeCardClass : inactiveCardClass;
+
+    if (secMbit) secMbit.classList.toggle('hidden', !isMbit);
+    if (secEspWifi) secEspWifi.classList.toggle('hidden', !isEspWifi);
+    if (secEspBle) secEspBle.classList.toggle('hidden', !isEspBle);
+
+    // 5. Update Status Indicators inside Modal
     const mbitStatus = $('mbit-modal-status');
     const esp32Status = $('esp32-modal-status');
+    const esp32BleStatus = $('esp32-ble-modal-status');
     const esp32Telem = $('esp32-telemetry-box');
     const simToggle = $('mbit-sim-toggle');
     const hostInput = $('esp32-host-input');
@@ -2343,25 +2418,34 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     }
 
     if (mbitStatus) {
-      mbitStatus.innerText = isSim ? 'SIMULASI' : (!isEsp ? st : 'OFFLINE');
-      mbitStatus.className = (!isEsp && (st === 'CONNECTED' || st === 'READY' || isSim))
+      mbitStatus.innerText = isSim ? 'SIMULASI' : (isMbit ? st : 'OFFLINE');
+      mbitStatus.className = (isMbit && (st === 'CONNECTED' || st === 'READY' || isSim))
         ? 'pill green font-bold'
         : 'pill gray font-bold';
     }
 
     if (esp32Status) {
-      esp32Status.innerText = isSim ? 'SIMULASI' : (isEsp ? st : 'OFFLINE');
-      esp32Status.className = (isEsp && (st === 'CONNECTED' || st === 'READY' || isSim))
+      esp32Status.innerText = isSim ? 'SIMULASI' : (isEspWifi ? st : 'OFFLINE');
+      esp32Status.className = (isEspWifi && (st === 'CONNECTED' || st === 'READY' || isSim))
         ? 'pill green font-bold'
-        : (isEsp && (st === 'CONNECTING' || st === 'RECONNECTING') 
+        : (isEspWifi && (st === 'CONNECTING' || st === 'RECONNECTING') 
           ? 'pill yellow font-bold' 
-          : (isEsp && st === 'ERROR' ? 'pill red font-bold' : 'pill gray font-bold'));
+          : (isEspWifi && st === 'ERROR' ? 'pill red font-bold' : 'pill gray font-bold'));
+    }
+
+    if (esp32BleStatus) {
+      esp32BleStatus.innerText = isSim ? 'SIMULASI' : (isEspBle ? st : 'OFFLINE');
+      esp32BleStatus.className = (isEspBle && (st === 'CONNECTED' || st === 'READY' || isSim))
+        ? 'pill green font-bold'
+        : (isEspBle && (st === 'CONNECTING' || st === 'RECONNECTING') 
+          ? 'pill yellow font-bold' 
+          : (isEspBle && st === 'ERROR' ? 'pill red font-bold' : 'pill gray font-bold'));
     }
 
     if (esp32Telem) {
       const activeAdapter = window.deviceManager ? window.deviceManager.getActiveAdapter() : null;
       const telem = activeAdapter ? activeAdapter.lastTelemetry : null;
-      if (isEsp && (st === 'CONNECTED' || isSim) && telem) {
+      if (isEspWifi && (st === 'CONNECTED' || isSim) && telem) {
         esp32Telem.classList.remove('hidden');
         const telemText = $('esp32-telemetry-text');
         if (telemText) {
@@ -2392,22 +2476,28 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   /* Universal Connect Handler */
   window.connectCurrentDevice = async () => {
     const dev = window.deviceManager?.config?.deviceType || 'MICROBIT';
-    const isEsp = dev === 'ESP32';
-    if (isEsp) {
+    const conn = window.deviceManager?.config?.connectionType || 'BLE';
+    const isEspWifi = dev === 'ESP32' && conn === 'WIFI';
+    const isEspBle = dev === 'ESP32_BLE' || (dev === 'ESP32' && conn === 'BLE');
+    const isMbit = dev === 'MICROBIT';
+    const currentHost = window.deviceManager?.config?.host || 'http://172.25.15.108';
+    const devLabel = isMbit ? 'micro:bit Bluetooth' : (isEspWifi ? `ESP32 Wi-Fi (${currentHost})` : 'ESP32 Bluetooth BLE');
+
+    if (isEspWifi) {
       const hostInput = $('esp32-host-input');
       if (hostInput && hostInput.value.trim()) {
         window.deviceManager.setHost(hostInput.value.trim());
       }
     }
-    const currentHost = window.deviceManager?.config?.host || 'http://172.25.15.108';
-    showToast(state.lang === 'id' ? `Menghubungkan ke ${isEsp ? `ESP32 Wi-Fi (${currentHost})` : 'micro:bit Bluetooth'}...` : `Connecting to ${isEsp ? `ESP32 Wi-Fi (${currentHost})` : 'micro:bit Bluetooth'}...`);
+
+    showToast(state.lang === 'id' ? `Menghubungkan ke ${devLabel}...` : `Connecting to ${devLabel}...`);
     try {
       const res = await window.deviceManager.connect();
       if (res && res.ok) {
         showToast(state.lang === 'id'
-          ? `Sukses Terhubung ke ${isEsp ? `ESP32 Wi-Fi (${window.deviceManager.config.host})` : 'micro:bit'}! (${res.simulated ? 'Mode Simulasi' : (res.telemetry?.deviceId || 'Online')})`
-          : `Connected to ${isEsp ? `ESP32 Wi-Fi (${window.deviceManager.config.host})` : 'micro:bit'}!`);
-        logActivity("fas fa-plug-circle-check", "background:rgba(34,197,94,.15);color:#22c55e", `${dev} Connected`, res.simulated ? "Mode Simulasi" : (res.telemetry?.deviceId || (isEsp ? window.deviceManager.config.host : "BLE UART")));
+          ? `Sukses Terhubung ke ${devLabel}! (${res.simulated ? 'Mode Simulasi' : (res.telemetry?.deviceId || 'Online')})`
+          : `Connected to ${devLabel}!`);
+        logActivity("fas fa-plug-circle-check", "background:rgba(34,197,94,.15);color:#22c55e", `${dev} Connected`, res.simulated ? "Mode Simulasi" : (res.telemetry?.deviceId || (isEspWifi ? window.deviceManager.config.host : "BLE UART")));
         window.closeModal('microbit-modal');
       } else {
         showToast((state.lang === 'id' ? "Gagal tersambung: " : "Connection failed: ") + (res?.error || 'Offline'));
@@ -2419,13 +2509,17 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
   /* Reconnect ESP32 */
   window.reconnectCurrentDevice = async () => {
+    const dev = window.deviceManager?.config?.deviceType || 'MICROBIT';
+    const conn = window.deviceManager?.config?.connectionType || 'BLE';
+    const isEspWifi = dev === 'ESP32' && conn === 'WIFI';
     const targetHost = window.deviceManager?.config?.host || 'http://172.25.15.108';
-    showToast(state.lang === 'id' ? `Mencoba menghubungkan ulang ke ESP32 (${targetHost})...` : `Reconnecting to ESP32 (${targetHost})...`);
+    const devDesc = isEspWifi ? `ESP32 Wi-Fi (${targetHost})` : (dev === 'MICROBIT' ? 'micro:bit Bluetooth' : 'ESP32 Bluetooth BLE');
+    showToast(state.lang === 'id' ? `Mencoba menghubungkan ulang ke ${devDesc}...` : `Reconnecting to ${devDesc}...`);
     try {
       const res = await window.deviceManager.reconnect();
       if (res && res.ok) {
-        showToast(state.lang === 'id' ? `ESP32 berhasil terhubung kembali (${window.deviceManager.config.host})!` : "ESP32 reconnected successfully!");
-        logActivity("fas fa-arrows-rotate", "background:rgba(34,197,94,.15);color:#22c55e", "ESP32 Reconnected", window.deviceManager.config.host);
+        showToast(state.lang === 'id' ? `${devDesc} berhasil terhubung kembali!` : `${devDesc} reconnected successfully!`);
+        logActivity("fas fa-arrows-rotate", "background:rgba(34,197,94,.15);color:#22c55e", `${dev} Reconnected`, isEspWifi ? window.deviceManager.config.host : "BLE");
       } else {
         showToast("Reconnect gagal: " + (res?.error || 'Perangkat tidak merespons'));
       }
@@ -2444,89 +2538,58 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
   /* Test Pulse Handler */
   window.sendTestPulseCurrentDevice = async () => {
-    const isEsp = window.deviceManager?.config?.deviceType === 'ESP32';
-    if (isEsp) {
+    const dev = window.deviceManager?.config?.deviceType || 'MICROBIT';
+    const conn = window.deviceManager?.config?.connectionType || 'BLE';
+    const isEspWifi = dev === 'ESP32' && conn === 'WIFI';
+    const currentHost = window.deviceManager?.config?.host || 'http://172.25.15.108';
+
+    if (isEspWifi) {
       const hostInput = $('esp32-host-input');
       if (hostInput && hostInput.value.trim()) {
         window.deviceManager.setHost(hostInput.value.trim());
       }
     }
-    const currentHost = window.deviceManager?.config?.host || 'http://172.25.15.108';
-    showToast(state.lang === 'id' ? `Mengirim sinyal uji test pulse ke ${isEsp ? currentHost : 'micro:bit'}...` : `Sending test pulse...`);
+
+    const targetDesc = isEspWifi ? currentHost : (dev === 'MICROBIT' ? 'micro:bit BLE' : 'ESP32 BLE');
+    showToast(state.lang === 'id' ? `Mengirim sinyal uji test pulse ke ${targetDesc}...` : `Sending test pulse...`);
     try {
       const res = await window.deviceManager.sendTestPulse();
       if (res && res.ok) {
-        showToast(state.lang === 'id' ? `Perangkat merespons di ${res.host || currentHost}! (${res.message || 'OK'})` : `Acknowledged: ${res.message || 'OK'}`);
-        logActivity("fas fa-wave-square", "background:rgba(99,102,241,.15);color:#6366f1", "Test Pulse OK", `${window.deviceManager.config.deviceType} (${res.targetUrl || currentHost})`);
+        showToast(state.lang === 'id' ? `Perangkat merespons (${res.host || targetDesc})! (${res.message || 'OK'})` : `Acknowledged: ${res.message || 'OK'}`);
+        logActivity("fas fa-wave-square", "background:rgba(99,102,241,.15);color:#6366f1", "Test Pulse OK", `${window.deviceManager.config.deviceType} (${res.targetUrl || targetDesc})`);
       } else {
-        showToast(`Test pulse gagal (${res?.targetUrl || currentHost}): ${res?.error || 'No response'}`);
+        showToast(`Test pulse gagal (${res?.targetUrl || targetDesc}): ${res?.error || 'No response'}`);
       }
     } catch (e) {
-      showToast(`Error test pulse (${currentHost}): ${e.message}`);
+      showToast(`Error test pulse (${targetDesc}): ${e.message}`);
     }
   };
 
   /* Switch Device UI Handler */
   window.onSelectDeviceType = (devType) => {
     if (!window.deviceManager || typeof window.deviceManager.switchDevice !== 'function') return;
-    const isEsp = devType === 'ESP32';
+    const rawTarget = String(devType || '').toUpperCase().trim();
+    const isEspBle = rawTarget === 'ESP32_BLE';
+    const isEspWifi = rawTarget === 'ESP32' || rawTarget === 'ESP32_WIFI';
     const hostInput = $('esp32-host-input');
     const host = (hostInput && hostInput.value.trim()) || window.deviceManager.config.host || 'http://172.25.15.108';
 
-    window.deviceManager.switchDevice(devType, { host });
-
-    // Update option card styles
-    const cardMbit = $('opt-card-microbit');
-    const cardEsp = $('opt-card-esp32');
-    const secMbit = $('sec-config-microbit');
-    const secEsp = $('sec-config-esp32');
-
-    if (cardMbit && cardEsp) {
-      if (isEsp) {
-        cardEsp.className = 'device-opt-card p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
-        cardMbit.className = 'device-opt-card p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100';
-      } else {
-        cardMbit.className = 'device-opt-card p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
-        cardEsp.className = 'device-opt-card p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100';
-      }
-    }
-
-    if (secMbit && secEsp) {
-      secMbit.classList.toggle('hidden', isEsp);
-      secEsp.classList.toggle('hidden', !isEsp);
+    if (isEspBle) {
+      window.deviceManager.switchDevice('ESP32_BLE');
+    } else if (isEspWifi) {
+      window.deviceManager.switchDevice('ESP32', { host, connectionType: 'WIFI' });
+    } else {
+      window.deviceManager.switchDevice('MICROBIT');
     }
 
     updateDeviceUI({ status: window.deviceManager.getStatus().state });
-    showToast(isEsp ? `Perangkat target diubah ke ESP32 (Wi-Fi: ${host})` : "Perangkat target diubah ke BBC micro:bit (Bluetooth)");
+    const toastMsg = isEspBle ? "Perangkat target diubah ke ESP32 (Bluetooth BLE)" :
+      (isEspWifi ? `Perangkat target diubah ke ESP32 (Wi-Fi: ${host})` : "Perangkat target diubah ke BBC micro:bit (Bluetooth)");
+    showToast(toastMsg);
   };
 
   /* Modal Open Handler */
   window.openDeviceManagerModal = () => {
-    const cfg = window.deviceManager ? window.deviceManager.config : { deviceType: 'MICROBIT' };
-    const devType = cfg.deviceType || 'MICROBIT';
-    const isEsp = devType === 'ESP32';
-
-    // Sinkronkan card & form selection
-    const cardMbit = $('opt-card-microbit');
-    const cardEsp = $('opt-card-esp32');
-    const secMbit = $('sec-config-microbit');
-    const secEsp = $('sec-config-esp32');
-
-    if (cardMbit && cardEsp) {
-      if (isEsp) {
-        cardEsp.className = 'device-opt-card p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
-        cardMbit.className = 'device-opt-card p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100';
-      } else {
-        cardMbit.className = 'device-opt-card p-3 rounded-xl border-2 cursor-pointer transition-all border-blue-500 bg-blue-50/50 dark:bg-blue-950/20';
-        cardEsp.className = 'device-opt-card p-3 rounded-xl border cursor-pointer transition-all border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100';
-      }
-    }
-
-    if (secMbit && secEsp) {
-      secMbit.classList.toggle('hidden', isEsp);
-      secEsp.classList.toggle('hidden', !isEsp);
-    }
-
     const isSim = window.deviceManager && typeof window.deviceManager.isSimulated === 'function' ? window.deviceManager.isSimulated() : false;
     const simToggle = $('mbit-sim-toggle');
     if (simToggle) simToggle.checked = isSim;
@@ -2571,9 +2634,16 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     if (window.deviceManager && typeof window.deviceManager.switchDevice === 'function') {
       const hostInput = $('esp32-host-input');
       const activeHost = (hostInput && hostInput.value.trim()) || window.deviceManager.config.host || 'http://172.25.15.108';
-      window.deviceManager.switchDevice(type, { host: activeHost });
+      const rawType = String(type || '').toUpperCase().trim();
+      if (rawType === 'ESP32_BLE') {
+        window.deviceManager.switchDevice('ESP32_BLE');
+      } else if (rawType === 'ESP32' || rawType === 'ESP32_WIFI') {
+        window.deviceManager.switchDevice('ESP32', { host: activeHost, connectionType: 'WIFI' });
+      } else {
+        window.deviceManager.switchDevice('MICROBIT');
+      }
     }
-    // Langsung eksekusi koneksi perangkat terpilih (baik micro:bit maupun ESP32)
+    // Langsung eksekusi koneksi perangkat terpilih (micro:bit BLE, ESP32 Wi-Fi, atau ESP32 BLE)
     await window.connectCurrentDevice();
   };
 

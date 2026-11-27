@@ -30,6 +30,7 @@
     root.NORDIC_UART_SERVICE_UUID = mod.NORDIC_UART_SERVICE_UUID;
     root.MicrobitBLEAdapter = mod.MicrobitBLEAdapter;
     root.ESP32WiFiAdapter = mod.ESP32WiFiAdapter;
+    root.ESP32BLEAdapter = mod.ESP32BLEAdapter;
     root.DeviceConnectionManager = mod.DeviceConnectionManager;
     root.aggregateSortingDistribution = mod.aggregateSortingDistribution;
   }
@@ -41,7 +42,8 @@
   // =========================================================================
   const DEVICE_TYPES = {
     MICROBIT: 'MICROBIT',
-    ESP32: 'ESP32'
+    ESP32: 'ESP32',
+    ESP32_BLE: 'ESP32_BLE'
   };
 
   const CONNECTION_TYPES = {
@@ -826,21 +828,401 @@
   }
 
   // =========================================================================
+  // 3C. ADAPTER BLUETOOTH BLE ESP32 (Nordic UART Service GATT)
+  // =========================================================================
+  class ESP32BLEAdapter {
+    constructor(config = {}) {
+      this.deviceType = DEVICE_TYPES.ESP32_BLE;
+      this.connectionType = CONNECTION_TYPES.BLE;
+      this.simulationMode = Boolean(config.simulationMode);
+      this.targetDeviceName = config.deviceName || 'VERNOVA-ESP32';
+      this.device = null;
+      this.server = null;
+      this.rxCharacteristic = null;
+      this.txCharacteristic = null;
+      this.status = this.simulationMode ? CONNECTION_STATES.SIMULATED : CONNECTION_STATES.DISCONNECTED;
+      this.lastError = null;
+      this.lastAck = null;
+      this.lastTelemetry = null;
+      this.sensorState = {
+        state: 'OBJECT_ABSENT',
+        objectPresent: false,
+        lastUpdate: null,
+        channels: {}
+      };
+      this._listeners = new Set();
+
+      if (this.simulationMode) {
+        this._initSimulatedTelemetry();
+      }
+    }
+
+    _initSimulatedTelemetry() {
+      this.lastTelemetry = {
+        deviceId: 'VERNOVA-ESP32-BLE-SIM',
+        firmwareVersion: 'ESP32-BLE-v2.2',
+        state: 'READY',
+        protocol: 'NORDIC-UART-STRING',
+        lastSeen: new Date().toISOString()
+      };
+    }
+
+    addListener(fn) {
+      if (typeof fn === 'function') this._listeners.add(fn);
+      return () => this._listeners.delete(fn);
+    }
+
+    onStatusChange(fn) {
+      return this.addListener(fn);
+    }
+
+    _notify(status, message = '', extra = {}) {
+      this.status = status;
+      const ev = {
+        deviceType: this.deviceType,
+        connectionType: this.connectionType,
+        status,
+        message,
+        timestamp: new Date().toISOString(),
+        ...extra
+      };
+      this._listeners.forEach(fn => {
+        try { fn(ev); } catch (e) { console.warn('Listener error:', e); }
+      });
+    }
+
+    isSupported() {
+      return isWebBluetoothSupported();
+    }
+
+    getStatus() {
+      return {
+        deviceType: this.deviceType,
+        connectionType: this.connectionType,
+        state: this.status,
+        simulationMode: this.simulationMode,
+        lastError: this.lastError,
+        telemetry: this.lastTelemetry,
+        sensorState: this.sensorState
+      };
+    }
+
+    getSensorState() {
+      return this.sensorState;
+    }
+
+    setSimulation(isSim) {
+      this.simulationMode = Boolean(isSim);
+      if (this.simulationMode) {
+        this._initSimulatedTelemetry();
+        this._notify(CONNECTION_STATES.SIMULATED, 'Mode simulasi ESP32 BLE aktif.');
+      } else {
+        this.status = this.device && this.device.gatt?.connected ? CONNECTION_STATES.CONNECTED : CONNECTION_STATES.DISCONNECTED;
+        this._notify(this.status, 'Mode perangkat fisik aktif.');
+      }
+      return this.simulationMode;
+    }
+
+    async connect() {
+      if (this.simulationMode) {
+        this._initSimulatedTelemetry();
+        this._notify(CONNECTION_STATES.SIMULATED, 'Tersambung ke ESP32 Bluetooth BLE (Simulasi Virtual).');
+        return { ok: true, simulated: true, telemetry: this.lastTelemetry };
+      }
+
+      if (!this.isSupported()) {
+        const errMsg = 'Web Bluetooth API tidak didukung di browser ini. Gunakan Google Chrome atau Microsoft Edge melalui HTTPS atau localhost.';
+        this.lastError = errMsg;
+        this._notify(CONNECTION_STATES.ERROR, errMsg);
+        return { ok: false, error: errMsg, unsupported: true };
+      }
+
+      try {
+        this._notify(CONNECTION_STATES.CONNECTING, 'Memindai perangkat ESP32 Bluetooth BLE...');
+        this.device = await navigator.bluetooth.requestDevice({
+          filters: [
+            { namePrefix: 'VERNOVA' },
+            { namePrefix: 'ESP32' },
+            { namePrefix: 'VERNOVA-ESP32' }
+          ],
+          optionalServices: [NORDIC_UART_SERVICE_UUID]
+        });
+
+        this.device.addEventListener('gattserverdisconnected', () => {
+          this._notify(CONNECTION_STATES.DISCONNECTED, 'Koneksi ESP32 Bluetooth BLE terputus.');
+        });
+
+        this._notify(CONNECTION_STATES.CONNECTING, `Menghubungkan ke ${this.device.name || 'ESP32 BLE'}...`);
+        this.server = await this.device.gatt.connect();
+
+        const service = await this.server.getPrimaryService(NORDIC_UART_SERVICE_UUID);
+
+        // Ambil characteristics RX (write) dan TX (notify)
+        const chars = await service.getCharacteristics();
+        this.rxCharacteristic = chars.find(c => c.properties.write || c.properties.writeWithoutResponse);
+        this.txCharacteristic = chars.find(c => c.properties.notify || c.properties.indicate);
+
+        if (this.txCharacteristic) {
+          try {
+            await this.txCharacteristic.startNotifications();
+            this.txCharacteristic.addEventListener('characteristicvaluechanged', (ev) => {
+              const text = new TextDecoder().decode(ev.target.value);
+              this._handleIncomingText(text);
+            });
+          } catch (e) {
+            console.warn('ESP32 BLE notification start warning:', e);
+          }
+        }
+
+        this.lastTelemetry = {
+          deviceId: this.device.name || 'VERNOVA-ESP32-BLE',
+          firmwareVersion: 'ESP32-BLE-UART-v2.2',
+          state: 'READY',
+          protocol: 'NORDIC-UART-STRING',
+          lastSeen: new Date().toISOString()
+        };
+
+        this._notify(CONNECTION_STATES.CONNECTED, `Terhubung ke ESP32 Bluetooth BLE (${this.device.name || 'Device'}).`);
+        return { ok: true, deviceName: this.device.name, telemetry: this.lastTelemetry };
+      } catch (err) {
+        this.lastError = err.message;
+        this._notify(CONNECTION_STATES.ERROR, `Gagal koneksi ESP32 BLE: ${err.message}`);
+        return { ok: false, error: err.message };
+      }
+    }
+
+    _handleIncomingText(text) {
+      const raw = String(text || '');
+      console.log(`[BLE RX] ${raw.trim()}`);
+      const lines = raw.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
+
+      lines.forEach(line => {
+        this.lastAck = { raw: line, timestamp: new Date().toISOString() };
+
+        // 1. Parsing Telemetri Sensor
+        if (line.includes('SENSOR:OBJECT_PRESENT')) {
+          this.sensorState.objectPresent = true;
+          this.sensorState.state = 'OBJECT_PRESENT';
+          this.sensorState.lastUpdate = new Date().toISOString();
+          this._notify(this.status, `[ESP32 BLE RX] ${line}`, {
+            type: 'sensor_telemetry',
+            sensorState: { ...this.sensorState },
+            rawText: line
+          });
+        } else if (line.includes('SENSOR:OBJECT_ABSENT')) {
+          this.sensorState.objectPresent = false;
+          this.sensorState.state = 'OBJECT_ABSENT';
+          this.sensorState.lastUpdate = new Date().toISOString();
+          this._notify(this.status, `[ESP32 BLE RX] ${line}`, {
+            type: 'sensor_telemetry',
+            sensorState: { ...this.sensorState },
+            rawText: line
+          });
+        } else if (line.startsWith('SENSOR:')) {
+          // Format spesifik: SENSOR:MERAH:OBJECT_PRESENT dsb.
+          const parts = line.split(':');
+          if (parts.length >= 3) {
+            const channel = parts[1].toUpperCase();
+            const state = parts[2].toUpperCase();
+            this.sensorState.channels[channel] = state;
+            if (state === 'OBJECT_PRESENT') {
+              this.sensorState.objectPresent = true;
+              this.sensorState.state = 'OBJECT_PRESENT';
+            }
+            this.sensorState.lastUpdate = new Date().toISOString();
+            this._notify(this.status, `[ESP32 BLE RX] ${line}`, {
+              type: 'sensor_telemetry',
+              channel,
+              sensorState: { ...this.sensorState },
+              rawText: line
+            });
+          }
+        }
+
+        // 2. Parsing Stage Updates
+        if (line.startsWith('STATUS:')) {
+          const stage = line.replace(/^STATUS:/, '').trim();
+          this._notify(this.status, `[ESP32 BLE Status] ${stage}`, {
+            type: 'stage_update',
+            stage,
+            rawText: line
+          });
+        }
+
+        // 3. Notifikasi umum
+        this._notify(this.status, `[ESP32 BLE RX] ${line}`, { rawText: line });
+      });
+    }
+
+    receiveMockData(text) {
+      this._handleIncomingText(text);
+    }
+
+    async disconnect() {
+      if (this.device && this.device.gatt && this.device.gatt.connected) {
+        this.device.gatt.disconnect();
+      }
+      this.device = null;
+      this.server = null;
+      this.rxCharacteristic = null;
+      this.txCharacteristic = null;
+      this._notify(CONNECTION_STATES.DISCONNECTED, 'Koneksi ESP32 Bluetooth BLE diputuskan.');
+      return { ok: true };
+    }
+
+    async reconnect() {
+      await this.disconnect();
+      return await this.connect();
+    }
+
+    async _writeBLECommand(str) {
+      console.log(`[BLE TX] ${str}`);
+      if (this.simulationMode) return true;
+      if (!this.rxCharacteristic) throw new Error('Karakteristik ESP32 BLE UART tidak siap.');
+      const data = new TextEncoder().encode(str + '\n');
+      if (this.rxCharacteristic.writeValueWithResponse) {
+        await this.rxCharacteristic.writeValueWithResponse(data);
+      } else {
+        await this.rxCharacteristic.writeValue(data);
+      }
+      return true;
+    }
+
+    // Alias kompatibilitas
+    async _writeBLE(str) {
+      return await this._writeBLECommand(str);
+    }
+
+    async sendSortingCommand(params = {}) {
+      const rawColor = String(params.color || params || '').toLowerCase().trim();
+      let color = null;
+      if (rawColor.includes('kuning') || rawColor.includes('yellow')) color = 'kuning';
+      else if (rawColor.includes('biru') || rawColor.includes('blue')) color = 'biru';
+      else if (rawColor.includes('merah') || rawColor.includes('red')) color = 'merah';
+
+      if (!VALID_COLORS.includes(color)) {
+        throw new Error(`Warna tidak valid: "${params.color}". Harus salah satu dari: ${VALID_COLORS.join(', ')}`);
+      }
+
+      const mode = params.mode && VALID_MODES.includes(params.mode) ? params.mode : 'Servo';
+      const commandId = params.commandId || `CMD_ESP_BLE_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const startTime = Date.now();
+
+      // Kasus A: Simulasi Virtual
+      if (this.simulationMode) {
+        this._notify(CONNECTION_STATES.BUSY, `[ESP32 BLE Simulasi] Sortir ${color} (${mode})`);
+        await new Promise(r => setTimeout(r, 200));
+        const durationMs = Date.now() - startTime;
+        const result = {
+          ok: true,
+          simulated: true,
+          commandId,
+          color,
+          mode,
+          status: 'COMPLETED',
+          executionStatus: 'simulated_esp32_ble',
+          durationMs,
+          message: `Simulasi ESP32 BLE ${color} sukses.`
+        };
+        this.lastAck = result;
+        this._notify(CONNECTION_STATES.SIMULATED, `[ESP32 BLE Simulasi] Selesai ${color} (${mode})`);
+        return result;
+      }
+
+      // Kasus B: Hardware Nyata via BLE GATT UART (Format teks identik micro:bit)
+      this._notify(CONNECTION_STATES.BUSY, `Mengirim ke ESP32 BLE: "${color}" (${mode})...`);
+      try {
+        await this._writeBLECommand(color);
+        const durationMs = Date.now() - startTime;
+        const result = {
+          ok: true,
+          commandId,
+          color,
+          mode,
+          status: 'COMMAND_RECEIVED',
+          executionStatus: 'confirmed_esp32_ble',
+          durationMs
+        };
+        this.lastAck = result;
+        this._notify(CONNECTION_STATES.CONNECTED, `ESP32 BLE sortir ${color} terkirim (${durationMs}ms)`);
+        return result;
+      } catch (err) {
+        const durationMs = Date.now() - startTime;
+        this.lastError = err.message;
+        this._notify(CONNECTION_STATES.ERROR, `Gagal kirim ke ESP32 BLE: ${err.message}`);
+        return {
+          ok: false,
+          commandId,
+          color,
+          mode,
+          status: 'FAILED',
+          errorCode: 'ERR_ESP32_BLE_FAILED',
+          durationMs,
+          error: err.message
+        };
+      }
+    }
+
+    async sendModeCommand(modeName) {
+      const mode = VALID_MODES.includes(modeName) ? modeName : 'Servo';
+      const cmdStr = mode.toLowerCase();
+      if (this.simulationMode) return { ok: true, simulated: true, mode };
+      try {
+        await this._writeBLECommand(cmdStr);
+        return { ok: true, mode };
+      } catch (err) {
+        this.lastError = err.message;
+        return { ok: false, mode, error: err.message };
+      }
+    }
+
+    async sendEmergencyStop() {
+      if (this.simulationMode) return { ok: true, simulated: true, status: 'STOPPED' };
+      try {
+        await this._writeBLECommand('stop');
+        return { ok: true, status: 'STOPPED' };
+      } catch (err) {
+        this.lastError = err.message;
+        return { ok: false, error: err.message, status: 'STOP_UNCONFIRMED' };
+      }
+    }
+
+    async sendTestPulse() {
+      if (this.simulationMode) return { ok: true, simulated: true, status: 'PULSE_ACK', message: 'Test pulse ESP32 BLE OK' };
+      try {
+        await this._writeBLECommand('test');
+        return { ok: true, message: 'Test pulse acknowledged' };
+      } catch (err) {
+        this.lastError = err.message;
+        return { ok: false, error: err.message };
+      }
+    }
+  }
+
+  // =========================================================================
   // 4. DEVICE CONNECTION MANAGER (Pengelola Komunikasi Terpadu & Debounce)
   // =========================================================================
   class DeviceConnectionManager {
     constructor(config = {}) {
       const savedDeviceType = (typeof localStorage !== 'undefined' && localStorage.getItem('rlab_device_type')) || DEVICE_TYPES.MICROBIT;
       const savedHost = (typeof localStorage !== 'undefined' && localStorage.getItem('rlab_esp32_host')) || 'http://172.25.15.108';
+      const savedConnType = (typeof localStorage !== 'undefined' && localStorage.getItem('rlab_connection_type')) ||
+        (savedDeviceType === DEVICE_TYPES.ESP32 ? CONNECTION_TYPES.WIFI : CONNECTION_TYPES.BLE);
+
+      const resolvedDevType = config.deviceType || savedDeviceType;
+      const resolvedConnType = config.connectionType ||
+        (resolvedDevType === DEVICE_TYPES.ESP32_BLE ? CONNECTION_TYPES.BLE :
+          (resolvedDevType === DEVICE_TYPES.ESP32 ? savedConnType : CONNECTION_TYPES.BLE));
 
       this.config = {
-        deviceType: config.deviceType || savedDeviceType,
-        connectionType: (config.deviceType || savedDeviceType) === DEVICE_TYPES.ESP32 ? CONNECTION_TYPES.WIFI : CONNECTION_TYPES.BLE,
+        deviceType: resolvedDevType,
+        connectionType: resolvedConnType,
         debounceMs: config.debounceMs || 1200,
         simulationMode: Boolean(config.simulationMode),
         operatingMode: config.operatingMode || OPERATING_MODES.AUTO,
         host: config.host || savedHost,
         deviceName: config.deviceName || 'BBC micro:bit',
+        esp32DeviceName: config.esp32DeviceName || 'VERNOVA-ESP32',
         ...config
       };
 
@@ -864,10 +1246,29 @@
         host: this.config.host
       });
 
+      this.esp32BleAdapter = new ESP32BLEAdapter({
+        simulationMode: this.config.simulationMode,
+        deviceName: this.config.esp32DeviceName
+      });
+
       this._setupAdapterListeners(this.microbitAdapter);
       this._setupAdapterListeners(this.esp32Adapter);
+      this._setupAdapterListeners(this.esp32BleAdapter);
 
-      this.adapter = this.config.deviceType === DEVICE_TYPES.ESP32 ? this.esp32Adapter : this.microbitAdapter;
+      this._resolveActiveAdapter();
+    }
+
+    _resolveActiveAdapter() {
+      const dev = this.config.deviceType;
+      const conn = this.config.connectionType;
+
+      if (dev === DEVICE_TYPES.ESP32_BLE || (dev === DEVICE_TYPES.ESP32 && conn === CONNECTION_TYPES.BLE)) {
+        this.adapter = this.esp32BleAdapter;
+      } else if (dev === DEVICE_TYPES.ESP32 || dev === 'ESP32_WIFI') {
+        this.adapter = this.esp32Adapter;
+      } else {
+        this.adapter = this.microbitAdapter;
+      }
     }
 
     _setupAdapterListeners(adapter) {
@@ -882,18 +1283,33 @@
     }
 
     switchDevice(deviceType, options = {}) {
-      const targetType = String(deviceType || '').toUpperCase().trim();
-      if (targetType !== DEVICE_TYPES.MICROBIT && targetType !== DEVICE_TYPES.ESP32) {
-        throw new Error(`Device type tidak valid: "${deviceType}". Harus MICROBIT atau ESP32.`);
+      const rawTarget = String(deviceType || '').toUpperCase().trim();
+      let targetType = rawTarget;
+      let targetConn = options.connectionType;
+
+      if (rawTarget === 'ESP32_BLE') {
+        targetType = DEVICE_TYPES.ESP32_BLE;
+        targetConn = CONNECTION_TYPES.BLE;
+      } else if (rawTarget === 'ESP32_WIFI') {
+        targetType = DEVICE_TYPES.ESP32;
+        targetConn = CONNECTION_TYPES.WIFI;
+      } else if (rawTarget === DEVICE_TYPES.ESP32) {
+        targetType = DEVICE_TYPES.ESP32;
+        targetConn = options.connectionType || CONNECTION_TYPES.WIFI;
+      } else if (rawTarget === DEVICE_TYPES.MICROBIT) {
+        targetType = DEVICE_TYPES.MICROBIT;
+        targetConn = CONNECTION_TYPES.BLE;
+      } else {
+        throw new Error(`Device type tidak valid: "${deviceType}". Harus MICROBIT, ESP32, ESP32_WIFI, atau ESP32_BLE.`);
       }
 
-      // Putuskan koneksi adapter lama bila aktif
+      // Putuskan koneksi adapter lama bila aktif secara tertib
       if (this.adapter && typeof this.adapter.disconnect === 'function') {
         this.adapter.disconnect().catch(() => {});
       }
 
       this.config.deviceType = targetType;
-      this.config.connectionType = targetType === DEVICE_TYPES.ESP32 ? CONNECTION_TYPES.WIFI : CONNECTION_TYPES.BLE;
+      this.config.connectionType = targetConn;
 
       if (options.host) {
         const sanitized = this.esp32Adapter.setHost(options.host);
@@ -905,11 +1321,12 @@
         this.setSimulation(options.simulationMode);
       }
 
-      this.adapter = targetType === DEVICE_TYPES.ESP32 ? this.esp32Adapter : this.microbitAdapter;
+      this._resolveActiveAdapter();
 
       // Simpan preferensi ke localStorage
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('rlab_device_type', targetType);
+        localStorage.setItem('rlab_connection_type', targetConn);
         if (this.config.host) localStorage.setItem('rlab_esp32_host', this.config.host);
       }
 
@@ -918,7 +1335,7 @@
       const ev = {
         type: 'device_switched',
         deviceType: targetType,
-        connectionType: this.config.connectionType,
+        connectionType: targetConn,
         status: currentStatus.state,
         host: this.config.host,
         timestamp: new Date().toISOString()
@@ -927,7 +1344,7 @@
         try { fn(ev); } catch (e) {}
       });
 
-      return { ok: true, deviceType: targetType, connectionType: this.config.connectionType };
+      return { ok: true, deviceType: targetType, connectionType: targetConn };
     }
 
     setHost(host) {
@@ -938,6 +1355,13 @@
         localStorage.setItem('rlab_esp32_host', sanitized);
       }
       return this.config.host;
+    }
+
+    getSensorState() {
+      if (this.adapter && typeof this.adapter.getSensorState === 'function') {
+        return this.adapter.getSensorState();
+      }
+      return { state: 'OBJECT_ABSENT', objectPresent: false, channels: {} };
     }
 
     addListener(fn) {
@@ -959,7 +1383,9 @@
         ...s,
         deviceType: this.config.deviceType,
         connectionType: this.config.connectionType,
-        operatingMode: this.operatingMode
+        operatingMode: this.operatingMode,
+        isEsp32: this.config.deviceType === DEVICE_TYPES.ESP32 || this.config.deviceType === DEVICE_TYPES.ESP32_BLE,
+        isMicrobit: this.config.deviceType === DEVICE_TYPES.MICROBIT
       };
     }
 
@@ -972,6 +1398,7 @@
       this.config.simulationMode = simVal;
       this.microbitAdapter.setSimulation(simVal);
       this.esp32Adapter.setSimulation(simVal);
+      if (this.esp32BleAdapter) this.esp32BleAdapter.setSimulation(simVal);
       return simVal;
     }
 
@@ -1078,6 +1505,7 @@
     NORDIC_UART_RX_CHARACTERISTIC_UUID,
     MicrobitBLEAdapter,
     ESP32WiFiAdapter,
+    ESP32BLEAdapter,
     DeviceConnectionManager,
     aggregateSortingDistribution
   };
