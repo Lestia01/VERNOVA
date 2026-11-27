@@ -852,9 +852,13 @@
       this.sensorState = {
         state: 'OBJECT_ABSENT',
         objectPresent: false,
+        mode: 'servo',
         lastUpdate: null,
-        channels: {}
+        channels: {},
+        sensors: { merah: false, biru: false, kuning: false, arm: false },
+        rawValues: { merah: null, biru: null, kuning: null, arm: null }
       };
+      this._rxBuffer = '';
       this._listeners = new Set();
 
       if (this.simulationMode) {
@@ -986,7 +990,7 @@
             await this.txCharacteristic.startNotifications();
             this.txCharacteristic.addEventListener('characteristicvaluechanged', (ev) => {
               const text = new TextDecoder().decode(ev.target.value);
-              this._handleIncomingText(text);
+              this._handleIncomingChunk(text);
             });
           } catch (e) {
             console.warn('ESP32 BLE notification start warning:', e);
@@ -995,9 +999,9 @@
 
         this.lastTelemetry = {
           deviceId: this.device.name || 'VERNOVA-ESP32-BLE',
-          firmwareVersion: 'ESP32-BLE-UART-v2.2',
+          firmwareVersion: 'ESP32-BLE-UART-v2.4',
           state: 'READY',
-          protocol: 'NORDIC-UART-STRING',
+          protocol: 'NORDIC-UART-JSON',
           lastSeen: new Date().toISOString()
         };
 
@@ -1010,71 +1014,180 @@
       }
     }
 
-    _handleIncomingText(text) {
-      const raw = String(text || '');
-      console.log(`[BLE RX] ${raw.trim()}`);
-      const lines = raw.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
+    _handleIncomingChunk(chunk) {
+      const raw = String(chunk || '');
+      this._rxBuffer += raw;
+      let newlineIdx;
+      while ((newlineIdx = this._rxBuffer.indexOf('\n')) !== -1) {
+        const line = this._rxBuffer.slice(0, newlineIdx).trim();
+        this._rxBuffer = this._rxBuffer.slice(newlineIdx + 1);
+        if (line.length > 0) {
+          this._processIncomingLine(line);
+        }
+      }
+    }
 
-      lines.forEach(line => {
-        this.lastAck = { raw: line, timestamp: new Date().toISOString() };
+    _processIncomingLine(line) {
+      if (!line) return;
+      console.log(`[BLE RX] ${line}`);
+      this.lastAck = { raw: line, timestamp: new Date().toISOString() };
 
-        // 1. Parsing Telemetri Sensor
-        if (line.includes('SENSOR:OBJECT_PRESENT')) {
-          this.sensorState.objectPresent = true;
-          this.sensorState.state = 'OBJECT_PRESENT';
-          this.sensorState.lastUpdate = new Date().toISOString();
-          this._notify(this.status, `[ESP32 BLE RX] ${line}`, {
-            type: 'sensor_telemetry',
-            sensorState: { ...this.sensorState },
-            rawText: line
-          });
-        } else if (line.includes('SENSOR:OBJECT_ABSENT')) {
-          this.sensorState.objectPresent = false;
-          this.sensorState.state = 'OBJECT_ABSENT';
-          this.sensorState.lastUpdate = new Date().toISOString();
-          this._notify(this.status, `[ESP32 BLE RX] ${line}`, {
-            type: 'sensor_telemetry',
-            sensorState: { ...this.sensorState },
-            rawText: line
-          });
-        } else if (line.startsWith('SENSOR:')) {
-          // Format spesifik: SENSOR:MERAH:OBJECT_PRESENT dsb.
-          const parts = line.split(':');
-          if (parts.length >= 3) {
-            const channel = parts[1].toUpperCase();
-            const state = parts[2].toUpperCase();
-            this.sensorState.channels[channel] = state;
-            if (state === 'OBJECT_PRESENT') {
-              this.sensorState.objectPresent = true;
-              this.sensorState.state = 'OBJECT_PRESENT';
-            }
-            this.sensorState.lastUpdate = new Date().toISOString();
-            this._notify(this.status, `[ESP32 BLE RX] ${line}`, {
-              type: 'sensor_telemetry',
-              channel,
-              sensorState: { ...this.sensorState },
-              rawText: line
-            });
+      // 1. Parsing JSON (Format Telemetri Sensor ESP32 Berdasarkan MakeCode & ADC)
+      let parsedJson = null;
+      if (line.startsWith('{') && line.endsWith('}')) {
+        try {
+          parsedJson = JSON.parse(line);
+        } catch (e) {
+          // Bukan JSON valid, lanjut ke parser teks
+        }
+      }
+
+      if (parsedJson && parsedJson.type) {
+        if (parsedJson.type === 'sensor_update') {
+          const sName = String(parsedJson.sensor || '').toLowerCase().trim();
+          const isDetected = Boolean(parsedJson.detected);
+          const rawVal = parsedJson.value !== undefined ? parsedJson.value : null;
+
+          if (sName) {
+            this.sensorState.sensors[sName] = isDetected;
+            this.sensorState.rawValues[sName] = rawVal;
+            this.sensorState.channels[sName.toUpperCase()] = isDetected ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT';
           }
+          const anyDetected = Object.values(this.sensorState.sensors).some(Boolean);
+          this.sensorState.objectPresent = anyDetected;
+          this.sensorState.state = anyDetected ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT';
+          this.sensorState.lastUpdate = new Date().toISOString();
+
+          this._notify(this.status, `[ESP32 BLE] Sensor ${sName}: ${isDetected ? 'TERDETEKSI' : 'KOSONG'} (raw: ${rawVal})`, {
+            type: 'sensor_telemetry',
+            sensor: sName,
+            detected: isDetected,
+            value: rawVal,
+            timestamp: parsedJson.timestamp || Date.now(),
+            sensorState: { ...this.sensorState },
+            rawText: line,
+            jsonData: parsedJson
+          });
+          return;
         }
 
-        // 2. Parsing Stage Updates
-        if (line.startsWith('STATUS:')) {
-          const stage = line.replace(/^STATUS:/, '').trim();
+        if (parsedJson.type === 'sensor_state') {
+          if (parsedJson.sensors && typeof parsedJson.sensors === 'object') {
+            Object.entries(parsedJson.sensors).forEach(([k, v]) => {
+              const sName = k.toLowerCase().trim();
+              const isDetected = Boolean(v);
+              this.sensorState.sensors[sName] = isDetected;
+              this.sensorState.channels[sName.toUpperCase()] = isDetected ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT';
+            });
+          }
+          if (parsedJson.mode) {
+            this.sensorState.mode = parsedJson.mode;
+          }
+          const anyDetected = Object.values(this.sensorState.sensors).some(Boolean);
+          this.sensorState.objectPresent = anyDetected;
+          this.sensorState.state = anyDetected ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT';
+          this.sensorState.lastUpdate = new Date().toISOString();
+
+          this._notify(this.status, `[ESP32 BLE] Sensor State Terpadu (mode: ${this.sensorState.mode})`, {
+            type: 'sensor_state',
+            mode: this.sensorState.mode,
+            sensorState: { ...this.sensorState },
+            rawText: line,
+            jsonData: parsedJson
+          });
+          return;
+        }
+
+        if (parsedJson.type === 'status_update') {
+          const stage = parsedJson.stage || '';
           this._notify(this.status, `[ESP32 BLE Status] ${stage}`, {
             type: 'stage_update',
             stage,
+            sensor: parsedJson.sensor || null,
+            rawText: line,
+            jsonData: parsedJson
+          });
+          return;
+        }
+      }
+
+      // 2. Parsing Format Teks (Kompatibilitas Penuh micro:bit MakeCode BLE)
+      if (line.includes('SENSOR:OBJECT_PRESENT')) {
+        this.sensorState.objectPresent = true;
+        this.sensorState.state = 'OBJECT_PRESENT';
+        this.sensorState.lastUpdate = new Date().toISOString();
+        this._notify(this.status, `[ESP32 BLE RX] ${line}`, {
+          type: 'sensor_telemetry',
+          sensorState: { ...this.sensorState },
+          rawText: line
+        });
+        return;
+      }
+
+      if (line.includes('SENSOR:OBJECT_ABSENT')) {
+        this.sensorState.objectPresent = false;
+        this.sensorState.state = 'OBJECT_ABSENT';
+        this.sensorState.lastUpdate = new Date().toISOString();
+        this._notify(this.status, `[ESP32 BLE RX] ${line}`, {
+          type: 'sensor_telemetry',
+          sensorState: { ...this.sensorState },
+          rawText: line
+        });
+        return;
+      }
+
+      if (line.startsWith('SENSOR:')) {
+        const parts = line.split(':');
+        if (parts.length >= 3) {
+          const channel = parts[1].toUpperCase().trim();
+          const channelLower = parts[1].toLowerCase().trim();
+          const state = parts[2].toUpperCase().trim();
+          const isPresent = (state === 'OBJECT_PRESENT');
+          this.sensorState.channels[channel] = state;
+          if (this.sensorState.sensors[channelLower] !== undefined) {
+            this.sensorState.sensors[channelLower] = isPresent;
+          }
+          if (isPresent) {
+            this.sensorState.objectPresent = true;
+            this.sensorState.state = 'OBJECT_PRESENT';
+          } else {
+            const any = Object.values(this.sensorState.channels).some(s => s === 'OBJECT_PRESENT');
+            this.sensorState.objectPresent = any;
+            this.sensorState.state = any ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT';
+          }
+          this.sensorState.lastUpdate = new Date().toISOString();
+          this._notify(this.status, `[ESP32 BLE RX] ${line}`, {
+            type: 'sensor_telemetry',
+            channel,
+            sensor: channelLower,
+            sensorState: { ...this.sensorState },
             rawText: line
           });
+          return;
         }
+      }
 
-        // 3. Notifikasi umum
-        this._notify(this.status, `[ESP32 BLE RX] ${line}`, { rawText: line });
-      });
+      // 3. Parsing Stage Updates
+      if (line.startsWith('STATUS:')) {
+        const stage = line.replace(/^STATUS:/, '').trim();
+        this._notify(this.status, `[ESP32 BLE Status] ${stage}`, {
+          type: 'stage_update',
+          stage,
+          rawText: line
+        });
+        return;
+      }
+
+      // 4. Notifikasi umum lainnya
+      this._notify(this.status, `[ESP32 BLE RX] ${line}`, { rawText: line });
+    }
+
+    _handleIncomingText(text) {
+      this._handleIncomingChunk(text);
     }
 
     receiveMockData(text) {
-      this._handleIncomingText(text);
+      this._handleIncomingChunk(text);
     }
 
     async disconnect() {
@@ -1085,6 +1198,7 @@
       this.server = null;
       this.rxCharacteristic = null;
       this.txCharacteristic = null;
+      this._rxBuffer = '';
       this._notify(CONNECTION_STATES.DISCONNECTED, 'Koneksi ESP32 Bluetooth BLE diputuskan.');
       return { ok: true };
     }

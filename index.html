@@ -2482,14 +2482,58 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     if (esp32Telem) {
       const activeAdapter = window.deviceManager ? window.deviceManager.getActiveAdapter() : null;
       const telem = activeAdapter ? activeAdapter.lastTelemetry : null;
-      if (isEspWifi && (st === 'CONNECTED' || isSim) && telem) {
+      const sensorState = activeAdapter ? (activeAdapter.sensorState || (typeof activeAdapter.getSensorState === 'function' ? activeAdapter.getSensorState() : null)) : null;
+
+      if ((isEspWifi || isEspBle) && (st === 'CONNECTED' || isSim)) {
         esp32Telem.classList.remove('hidden');
         const telemText = $('esp32-telemetry-text');
         if (telemText) {
-          telemText.innerText = `ID: ${telem.deviceId || 'ESP32'} | Host: ${telem.host || cfg.host} | Heap: ${telem.freeHeap ? Math.round(telem.freeHeap/1024) + ' KB' : 'OK'} | Uptime: ${telem.uptimeSec ? telem.uptimeSec + 's' : 'Aktif'}`;
+          if (sensorState && sensorState.sensors) {
+            const s = sensorState.sensors;
+            const r = sensorState.rawValues || {};
+            telemText.innerText = `M: ${s.merah ? 'ON' : '0'}(${r.merah ?? 0}) | B: ${s.biru ? 'ON' : '0'}(${r.biru ?? 0}) | K: ${s.kuning ? 'ON' : '0'}(raw:${r.kuning ?? '—'}) | ARM: ${s.arm ? 'ON' : '0'}(raw:${r.arm ?? '—'})`;
+          } else if (telem) {
+            telemText.innerText = `ID: ${telem.deviceId || 'ESP32'} | Host: ${telem.host || cfg.host} | Heap: ${telem.freeHeap ? Math.round(telem.freeHeap/1024) + ' KB' : 'OK'} | Uptime: ${telem.uptimeSec ? telem.uptimeSec + 's' : 'Aktif'}`;
+          }
         }
       } else {
         esp32Telem.classList.add('hidden');
+      }
+    }
+
+    // 6. Update Real-time Sensor Telemetry & Stage Pills
+    const manVerif = $('man-verif-pill');
+    if (manVerif && ev && (ev.type === 'sensor_telemetry' || ev.type === 'sensor_state')) {
+      const ss = ev.sensorState || (window.deviceManager && window.deviceManager.getActiveAdapter()?.sensorState);
+      if (ss && ss.sensors) {
+        const activeSensors = Object.entries(ss.sensors).filter(([_, v]) => v).map(([k]) => k.toUpperCase());
+        if (activeSensors.length > 0) {
+          manVerif.innerText = `VERIFIKASI: OBJEK FISIK TERDETEKSI (${activeSensors.join(', ')})`;
+          manVerif.className = 'pill green font-bold';
+        } else {
+          manVerif.innerText = 'VERIFIKASI: SENSOR KOSONG (STANDBY)';
+          manVerif.className = 'pill gray font-bold';
+        }
+      }
+    }
+
+    const manAck = $('man-ack-pill');
+    if (manAck && ev && ev.type === 'stage_update') {
+      if (ev.stage === 'OBJECT_DETECTED') {
+        manAck.innerText = 'STATUS: OBJEK TERDETEKSI (ARM)';
+        manAck.className = 'pill yellow font-bold';
+      } else if (ev.stage === 'BELT_RESUMED') {
+        manAck.innerText = 'STATUS: BELT RESUMED';
+        manAck.className = 'pill blue font-bold';
+      } else if (ev.stage === 'ARM_WORKING') {
+        manAck.innerText = 'STATUS: LENGAN ROBOT AKTIF';
+        manAck.className = 'pill orange font-bold';
+      } else if (ev.stage === 'BELT_MOVING') {
+        manAck.innerText = 'STATUS: BELT BERGERAK';
+        manAck.className = 'pill blue font-bold';
+      } else if (ev.stage === 'SERVO_DONE') {
+        manAck.innerText = 'STATUS: AKSI SERVO SELESAI';
+        manAck.className = 'pill green font-bold';
       }
     }
 

@@ -3,22 +3,28 @@
  * Firmware ESP32 Dual Connection (Wi-Fi HTTP REST + Bluetooth BLE UART)
  * 
  * Board: ESP32 DevKit V1 / NodeMCU-32S / ESP32-WROOM-32
- * Framework: Arduino IDE (ESP32 Arduino Core)
+ * Framework: Arduino IDE (ESP32 Arduino Core 2.x & 3.x Compatible)
  * 
  * Fitur Komunikasi Terpadu:
  * 1. Dual Wi-Fi Mode:
  *    - SoftAP Mode (Hotspot mandiri 'VERNOVA-ROBOT' IP: 192.168.4.1)
  *    - Station Mode (Koneksi ke Wi-Fi Lab Sekolah / Hotspot)
- *    - HTTP REST API dengan Full CORS (Endpoints: /api/health, /api/status, /api/sort, /api/mode, /api/stop, /api/test)
- * 2. Bluetooth Low Energy (BLE) GATT UART:
- *    - Service UUID: 6e400001-b5a3-f393-e0a9-e50e24dcca9e (Nordic UART Service)
+ *    - HTTP REST API dengan Full CORS (/api/health, /api/status, /api/sort, /api/mode, /api/stop, /api/test)
+ * 2. Bluetooth Low Energy (BLE) Nordic UART Service (NUS):
+ *    - Service UUID: 6e400001-b5a3-f393-e0a9-e50e24dcca9e
  *    - RX Char UUID: 6e400002-b5a3-f393-e0a9-e50e24dcca9e (Web Write)
  *    - TX Char UUID: 6e400003-b5a3-f393-e0a9-e50e24dcca9e (ESP32 Notify)
- *    - Kompatibilitas 100% dengan format perintah teks micro:bit MakeCode BLE!
- * 3. Logika Sortir Terpadu & Pencegahan Eksekusi Ganda:
- *    - Wi-Fi dan Bluetooth berbagi logika aktuator dan sensor yang sama persis.
- *    - Command deduplication & status BUSY mencegah tabrakan eksekusi dua koneksi.
- *    - Motor conveyor mati otomatis saat idle, terputus, atau emergency stop.
+ * 3. Telemetri Sensor Fisik Berdasarkan MakeCode micro:bit:
+ *    - Sensor Merah (GPIO 14, digital active LOW)
+ *    - Sensor Biru  (GPIO 13, digital active LOW)
+ *    - Sensor Kuning (GPIO 35, analog ADC: range 50 < value <= 400)
+ *    - Sensor Arm    (GPIO 34, analog ADC: value < 600)
+ *    - Emisi JSON satu baris \n: {"type":"sensor_update",...} & {"type":"sensor_state",...}
+ *    - Kompatibilitas teks micro:bit: SENSOR:<NAME>:OBJECT_PRESENT, STATUS:..., DONE:...
+ * 4. Kontrol Aktuator Aman:
+ *    - Kecepatan PWM Motor: Mode Servo = 200/255, Mode Arm = 150/255
+ *    - Sudut Servo Flap: Standby 90°, Sortir 30° (atau 40°/90°/140° per warna)
+ *    - Sudut Servo Arm: Standby 90°, Push 180°
  * ============================================================================== */
 
 #include <WiFi.h>
@@ -50,24 +56,52 @@ const char* STA_PASS = "";               // Contoh: "passwordLab"
 // =========================================================================
 // 2. PEMETAAN PIN PERANGKAT KERAS (GPIO MAPPING RESMI)
 // =========================================================================
-#define PIN_SENSOR_MERAH    14  // Sensor warna merah
-#define PIN_SENSOR_BIRU     13  // Sensor warna biru
-#define PIN_SENSOR_KUNING   35  // Sensor warna kuning (Input-only pada ESP32)
-#define PIN_SENSOR_ARM      34  // Sensor kehadiran objek area ARM (Input-only)
+#define PIN_SENSOR_MERAH    14  // Sensor warna merah (Digital active LOW)
+#define PIN_SENSOR_BIRU     13  // Sensor warna biru (Digital active LOW)
+#define PIN_SENSOR_KUNING   35  // Sensor warna kuning (Analog ADC, Input-only)
+#define PIN_SENSOR_ARM      34  // Sensor objek arm belt (Analog ADC, Input-only)
 
 #define PIN_MOTOR_ENA       25  // Motor Conveyor ENA (Enable/PWM)
 #define PIN_MOTOR_IN        26  // Motor Conveyor IN (Direction/Run)
 
-#define PIN_SERVO_FLAP      18  // Servo 1: Pemilah jalur (Flap/Gate)
+#define PIN_SERVO_FLAP      18  // Servo 1: Pemilah jalur (Flap)
 #define PIN_SERVO_ARM       19  // Servo 2: Lengan robot (Arm)
 #define PIN_LED_STATUS      2   // LED indikator onboard ESP32
 
-// Logika aktif sensor (Active LOW untuk sensor proximity/optik)
-#define SENSOR_ACTIVE_LEVEL LOW
-#define SENSOR_DEBOUNCE_MS  30
+// Mode pin sensor digital: INPUT aman untuk sensor dengan komparator LM393 internal pullup
+// Ganti ke INPUT_PULLUP jika modul open-collector tanpa resistor pull-up eksternal
+#define SENSOR_DIGITAL_MODE INPUT
 
 // =========================================================================
-// 3. OBJEK & VARIABEL GLOBAL
+// 3. PARAMETER AKTUATOR & KALIBRASI SENSOR
+// =========================================================================
+// Kecepatan PWM Motor (0 - 255)
+#define PWM_SPEED_SERVO     200 // Kecepatan mode servo: 200 dari 255
+#define PWM_SPEED_ARM       150 // Kecepatan mode arm: 150 dari 255
+
+// Sudut Gerakan Servo
+#define SERVO_STANDBY_ANGLE      90  // Standby servo (90 derajat)
+#define SERVO_SORT_ANGLE         30  // Sudut sortir umum (30 derajat)
+#define SERVO_ARM_STANDBY_ANGLE  90  // Standby servo lengan robot (90 derajat)
+#define SERVO_ARM_PUSH_ANGLE    180  // Gerakan dorong mode arm (180 derajat)
+
+// Sudut spesifik flap jalur warna (opsional / lanjutan)
+#define SERVO_FLAP_KUNING        40
+#define SERVO_FLAP_BIRU          90
+#define SERVO_FLAP_MERAH        140
+
+// Kalibrasi Threshold Sensor Analog (ESP32 ADC 12-bit: 0 - 4095)
+// Catatan: micro:bit menggunakan ADC 10-bit (0-1023). Nilai di bawah dapat dikalibrasi
+// berdasarkan nilai mentah (raw) yang ditampilkan di Serial Monitor & Web Telemetri.
+int thresholdKuningMin = 50;     // Deteksi kuning jika: value > 50 && value <= 400
+int thresholdKuningMax = 400;
+int thresholdArmMax    = 600;    // Deteksi arm jika: value < 600
+
+#define SENSOR_DEBOUNCE_MS  30   // Debounce filter
+#define HEARTBEAT_INTERVAL_MS 3000 // Pengiriman berkala telemetri sensor ke web
+
+// =========================================================================
+// 4. OBJEK & VARIABEL GLOBAL
 // =========================================================================
 WebServer server(80);
 Servo servoFlap;
@@ -85,33 +119,33 @@ String lastCommandId = "";
 unsigned long lastCommandTime = 0;
 bool motorRunning = false;
 
-// Debounce state 4 sensor fisik
-struct SensorChannel {
-  const char* name;
-  uint8_t pin;
-  bool isInputPullup;
-  bool lastRaw;
-  bool debouncedPresent;
+// Struktur State Sensor
+struct SensorData {
+  bool detected;
+  int rawValue;
+  bool lastRawDetected;
   unsigned long lastDebounceTime;
 };
 
-SensorChannel sensors[4] = {
-  { "MERAH",  PIN_SENSOR_MERAH,  true,  false, false, 0 },
-  { "BIRU",   PIN_SENSOR_BIRU,   true,  false, false, 0 },
-  { "KUNING", PIN_SENSOR_KUNING, false, false, false, 0 },
-  { "ARM",    PIN_SENSOR_ARM,    false, false, false, 0 }
-};
+SensorData sensorMerah  = { false, 1, false, 0 };
+SensorData sensorBiru   = { false, 1, false, 0 };
+SensorData sensorKuning = { false, 4095, false, 0 };
+SensorData sensorArm    = { false, 4095, false, 0 };
+
+unsigned long lastHeartbeatTime = 0;
 
 // =========================================================================
-// 4. KONTROL MOTOR & AKTUATOR AMAN
+// 5. KONTROL MOTOR & AKTUATOR AMAN (CORE 2.x & 3.x COMPATIBLE)
 // =========================================================================
-void setMotorRunning(bool run) {
+void setMotorRunning(bool run, int customPwm = -1) {
   motorRunning = run;
   if (run) {
-    digitalWrite(PIN_MOTOR_ENA, HIGH);
+    int pwm = (customPwm >= 0) ? customPwm : (currentMode == "arm" ? PWM_SPEED_ARM : PWM_SPEED_SERVO);
+    pwm = constrain(pwm, 0, 255);
+    analogWrite(PIN_MOTOR_ENA, pwm);
     digitalWrite(PIN_MOTOR_IN, HIGH);
   } else {
-    digitalWrite(PIN_MOTOR_ENA, LOW);
+    analogWrite(PIN_MOTOR_ENA, 0);
     digitalWrite(PIN_MOTOR_IN, LOW);
   }
 }
@@ -120,7 +154,7 @@ void notifyBLE(String message) {
   if (bleConnected && pBleTxChar) {
     pBleTxChar->setValue(message.c_str());
     pBleTxChar->notify();
-    delay(10);
+    delay(15); // Memberi jeda bagi BLE stack untuk transmisi paket
   }
   Serial.print("[BLE TX] ");
   Serial.print(message);
@@ -128,7 +162,137 @@ void notifyBLE(String message) {
 }
 
 // =========================================================================
-// 5. LOGIKA SORTIR TERPADU (SHARED ENGINE WI-FI & BLE)
+// 6. TELEMETRI SENSOR JSON & TEKS
+// =========================================================================
+void sendSensorUpdate(const char* name, bool detected, int rawValue) {
+  unsigned long ts = millis();
+  // 1. JSON Telemetri Standar
+  String json = "{\"type\":\"sensor_update\",\"sensor\":\"" + String(name) +
+                "\",\"detected\":" + (detected ? "true" : "false") +
+                ",\"value\":" + String(rawValue) +
+                ",\"timestamp\":" + String(ts) + "}\n";
+  notifyBLE(json);
+
+  // 2. Format Teks Kompatibel MakeCode micro:bit
+  String nameUpper = String(name);
+  nameUpper.toUpperCase();
+  String legacy = "SENSOR:" + nameUpper + ":" + (detected ? "OBJECT_PRESENT\n" : "OBJECT_ABSENT\n");
+  notifyBLE(legacy);
+}
+
+void sendFullSensorState() {
+  String json = "{\"type\":\"sensor_state\",\"mode\":\"" + currentMode + "\",\"sensors\":{";
+  json += "\"merah\":" + String(sensorMerah.detected ? "true" : "false") + ",";
+  json += "\"biru\":" + String(sensorBiru.detected ? "true" : "false") + ",";
+  json += "\"kuning\":" + String(sensorKuning.detected ? "true" : "false") + ",";
+  json += "\"arm\":" + String(sensorArm.detected ? "true" : "false");
+  json += "}}\n";
+  notifyBLE(json);
+
+  bool anyDetected = sensorMerah.detected || sensorBiru.detected || sensorKuning.detected || sensorArm.detected;
+  notifyBLE(anyDetected ? "SENSOR:OBJECT_PRESENT\n" : "SENSOR:OBJECT_ABSENT\n");
+}
+
+void printSensorDebug(const char* name, int raw, bool detected) {
+  Serial.print("[SENSOR] ");
+  Serial.print(name);
+  Serial.print(" raw=");
+  Serial.print(raw);
+  Serial.print(" detected=");
+  Serial.println(detected ? "true" : "false");
+}
+
+// =========================================================================
+// 7. PEMBACAAN & DEBOUNCE SENSOR FISIK
+// =========================================================================
+void updateSensors() {
+  unsigned long now = millis();
+  bool stateChanged = false;
+
+  // 1. Sensor Merah (GPIO 14, Digital Active LOW)
+  int rawM = digitalRead(PIN_SENSOR_MERAH);
+  bool detM = (rawM == LOW);
+  sensorMerah.rawValue = rawM;
+  if (detM != sensorMerah.lastRawDetected) {
+    sensorMerah.lastRawDetected = detM;
+    sensorMerah.lastDebounceTime = now;
+  }
+  if ((now - sensorMerah.lastDebounceTime) >= SENSOR_DEBOUNCE_MS) {
+    if (sensorMerah.detected != detM) {
+      sensorMerah.detected = detM;
+      stateChanged = true;
+      printSensorDebug("merah", rawM, detM);
+      sendSensorUpdate("merah", detM, rawM);
+    }
+  }
+
+  // 2. Sensor Biru (GPIO 13, Digital Active LOW)
+  int rawB = digitalRead(PIN_SENSOR_BIRU);
+  bool detB = (rawB == LOW);
+  sensorBiru.rawValue = rawB;
+  if (detB != sensorBiru.lastRawDetected) {
+    sensorBiru.lastRawDetected = detB;
+    sensorBiru.lastDebounceTime = now;
+  }
+  if ((now - sensorBiru.lastDebounceTime) >= SENSOR_DEBOUNCE_MS) {
+    if (sensorBiru.detected != detB) {
+      sensorBiru.detected = detB;
+      stateChanged = true;
+      printSensorDebug("biru", rawB, detB);
+      sendSensorUpdate("biru", detB, rawB);
+    }
+  }
+
+  // 3. Sensor Kuning (GPIO 35, Analog ADC: 50 < value <= 400)
+  int rawK = analogRead(PIN_SENSOR_KUNING);
+  bool detK = (rawK > thresholdKuningMin && rawK <= thresholdKuningMax);
+  sensorKuning.rawValue = rawK;
+  if (detK != sensorKuning.lastRawDetected) {
+    sensorKuning.lastRawDetected = detK;
+    sensorKuning.lastDebounceTime = now;
+  }
+  if ((now - sensorKuning.lastDebounceTime) >= SENSOR_DEBOUNCE_MS) {
+    if (sensorKuning.detected != detK) {
+      sensorKuning.detected = detK;
+      stateChanged = true;
+      printSensorDebug("kuning", rawK, detK);
+      sendSensorUpdate("kuning", detK, rawK);
+    }
+  }
+
+  // 4. Sensor Arm (GPIO 34, Analog ADC: value < 600)
+  int rawA = analogRead(PIN_SENSOR_ARM);
+  bool detA = (rawA < thresholdArmMax);
+  sensorArm.rawValue = rawA;
+  if (detA != sensorArm.lastRawDetected) {
+    sensorArm.lastRawDetected = detA;
+    sensorArm.lastDebounceTime = now;
+  }
+  if ((now - sensorArm.lastDebounceTime) >= SENSOR_DEBOUNCE_MS) {
+    if (sensorArm.detected != detA) {
+      sensorArm.detected = detA;
+      stateChanged = true;
+      printSensorDebug("arm", rawA, detA);
+      sendSensorUpdate("arm", detA, rawA);
+    }
+  }
+
+  // Jika ada perubahan pada salah satu sensor, perbarui state keseluruhan
+  if (stateChanged) {
+    sendFullSensorState();
+  }
+
+  // Heartbeat berkala (setiap 3 detik) untuk menjaga sinkronisasi UI
+  if (now - lastHeartbeatTime >= HEARTBEAT_INTERVAL_MS) {
+    lastHeartbeatTime = now;
+    if (bleConnected) {
+      sendFullSensorState();
+    }
+  }
+}
+
+// =========================================================================
+// 8. LOGIKA SORTIR TERPADU (SHARED ENGINE WI-FI & BLE)
 // =========================================================================
 bool executeSorting(String color, String mode, String commandId, String transportSource) {
   color.toLowerCase();
@@ -160,32 +324,83 @@ bool executeSorting(String color, String mode, String commandId, String transpor
 
   Serial.println("[SORT] Memulai sortir " + color + " (Mode: " + mode + ") via " + transportSource);
 
-  // 1. Jalankan conveyor belt membawa objek
-  setMotorRunning(true);
-  notifyBLE("STATUS:BELT_MOVING\n");
+  // Mode Arm vs Mode Servo
+  bool isArmMode = (mode == "arm" || currentMode == "arm");
 
-  // 2. Tentukan sudut Flap Servo 1
-  int flapAngle = 90; // Netral
-  if (color == "kuning") flapAngle = 40;
-  else if (color == "biru") flapAngle = 90;
-  else if (color == "merah") flapAngle = 140;
+  if (isArmMode) {
+    // -------------------------------------------------------------
+    // ALUR SORTIR MODE ARM
+    // -------------------------------------------------------------
+    // 1. Jalankan conveyor belt dengan PWM ARM (150/255)
+    setMotorRunning(true, PWM_SPEED_ARM);
+    notifyBLE("STATUS:BELT_MOVING\n");
 
-  servoFlap.write(flapAngle);
-  delay(150);
+    // Pastikan Flap pada posisi standby (90 derajat)
+    servoFlap.write(SERVO_STANDBY_ANGLE);
 
-  // 3. Jika mode ARM, lakukan aksi gerakan dorong Servo 2
-  if (mode == "arm" || currentMode == "arm") {
+    // Tunggu kehadiran objek di sensor arm (GPIO 34) dengan batas waktu 4 detik
+    unsigned long waitStart = millis();
+    bool armSensorTriggered = false;
+    while (millis() - waitStart < 4000) {
+      updateSensors();
+      if (sensorArm.detected) {
+        armSensorTriggered = true;
+        break;
+      }
+      delay(10);
+    }
+
+    if (armSensorTriggered) {
+      notifyBLE("STATUS:OBJECT_DETECTED\n");
+      notifyBLE("{\"type\":\"status_update\",\"stage\":\"OBJECT_DETECTED\",\"sensor\":\"arm\"}\n");
+      Serial.println("[ARM] Objek terdeteksi di sensor arm GPIO 34!");
+    }
+
+    // 2. Hentikan motor sejenak agar objek siap didorong
+    setMotorRunning(false);
     notifyBLE("STATUS:ARM_WORKING\n");
-    servoArm.write(120);
-    delay(250);
-    servoArm.write(20);
-    delay(150);
-    notifyBLE("STATUS:SERVO_DONE\n");
-  }
+    delay(100);
 
-  // 4. Selesaikan siklus sortir & hentikan motor
-  delay(300);
-  setMotorRunning(false);
+    // 3. Servo 2 (Lengan Robot) bergerak mendorong ke 180 derajat
+    servoArm.write(SERVO_ARM_PUSH_ANGLE);
+    delay(400);
+
+    // Kembalikan ke posisi standby
+    servoArm.write(SERVO_ARM_STANDBY_ANGLE);
+    delay(250);
+    notifyBLE("STATUS:SERVO_DONE\n");
+
+    // 4. Lanjutkan belt untuk membersihkan jalur
+    setMotorRunning(true, PWM_SPEED_ARM);
+    notifyBLE("STATUS:BELT_RESUMED\n");
+    notifyBLE("{\"type\":\"status_update\",\"stage\":\"BELT_RESUMED\"}\n");
+    delay(400);
+    setMotorRunning(false);
+
+  } else {
+    // -------------------------------------------------------------
+    // ALUR SORTIR MODE SERVO (FLAP)
+    // -------------------------------------------------------------
+    // 1. Jalankan conveyor belt dengan PWM SERVO (200/255)
+    setMotorRunning(true, PWM_SPEED_SERVO);
+    notifyBLE("STATUS:BELT_MOVING\n");
+
+    // 2. Tentukan sudut Flap Servo 1
+    int flapAngle = SERVO_STANDBY_ANGLE;
+    if (color == "kuning") flapAngle = SERVO_FLAP_KUNING;
+    else if (color == "biru") flapAngle = SERVO_FLAP_BIRU;
+    else if (color == "merah") flapAngle = SERVO_FLAP_MERAH;
+
+    servoFlap.write(flapAngle);
+    delay(350);
+
+    // Kembalikan flap ke standby setelah objek terarah
+    servoFlap.write(SERVO_STANDBY_ANGLE);
+    delay(200);
+
+    // 3. Selesaikan siklus sortir & hentikan motor
+    setMotorRunning(false);
+  }
 
   deviceState = "READY";
   digitalWrite(PIN_LED_STATUS, LOW);
@@ -202,8 +417,8 @@ bool executeSorting(String color, String mode, String commandId, String transpor
 
 void executeEmergencyStop() {
   setMotorRunning(false);
-  servoFlap.write(90);
-  servoArm.write(20);
+  servoFlap.write(SERVO_STANDBY_ANGLE);
+  servoArm.write(SERVO_ARM_STANDBY_ANGLE);
   deviceState = "STOPPED";
   digitalWrite(PIN_LED_STATUS, LOW);
 
@@ -222,6 +437,7 @@ void executeModeCommand(String modeName) {
     currentMode = "servo";
     notifyBLE("ACK:SERVO:READY\n");
   }
+  sendFullSensorState();
   Serial.println("[MODE] Mode aktif diubah ke: " + currentMode);
 }
 
@@ -234,41 +450,7 @@ void executeTestPulse() {
 }
 
 // =========================================================================
-// 6. UPDATE & TELEMETRI SENSOR FISIK
-// =========================================================================
-void updateSensors() {
-  unsigned long now = millis();
-  for (int i = 0; i < 4; i++) {
-    int rawRead = digitalRead(sensors[i].pin);
-    bool isPresent = (rawRead == SENSOR_ACTIVE_LEVEL);
-
-    if (isPresent != sensors[i].lastRaw) {
-      sensors[i].lastRaw = isPresent;
-      sensors[i].lastDebounceTime = now;
-    }
-
-    if ((now - sensors[i].lastDebounceTime) >= SENSOR_DEBOUNCE_MS) {
-      if (sensors[i].debouncedPresent != isPresent) {
-        sensors[i].debouncedPresent = isPresent;
-        
-        // Emisi pesan identik micro:bit: SENSOR:<NAME>:OBJECT_PRESENT
-        String msg = "SENSOR:" + String(sensors[i].name) + ":" + (isPresent ? "OBJECT_PRESENT\n" : "OBJECT_ABSENT\n");
-        notifyBLE(msg);
-
-        if (isPresent) {
-          notifyBLE("SENSOR:OBJECT_PRESENT\n");
-        } else {
-          bool any = false;
-          for (int j = 0; j < 4; j++) if (sensors[j].debouncedPresent) any = true;
-          if (!any) notifyBLE("SENSOR:OBJECT_ABSENT\n");
-        }
-      }
-    }
-  }
-}
-
-// =========================================================================
-// 7. HANDLER HTTP REST API (WI-FI)
+// 9. HANDLER HTTP REST API (WI-FI)
 // =========================================================================
 void setCorsHeaders() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -290,14 +472,20 @@ void handleHealth() {
   json += "\"ok\":true,";
   json += "\"deviceId\":\"" + deviceId + "\",";
   json += "\"deviceType\":\"ESP32\",";
-  json += "\"firmwareVersion\":\"2.3.0-DUAL\",";
+  json += "\"firmwareVersion\":\"2.4.0-DUAL\",";
   json += "\"state\":\"" + deviceState + "\",";
   json += "\"mode\":\"" + currentMode + "\",";
   json += "\"wifiRssi\":" + String(rssi) + ",";
   json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
   json += "\"uptimeSec\":" + String(uptimeSec) + ",";
   json += "\"ip\":\"" + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString()) + "\",";
-  json += "\"bleActive\":" + String(bleConnected ? "true" : "false");
+  json += "\"bleActive\":" + String(bleConnected ? "true" : "false") + ",";
+  json += "\"sensors\":{";
+  json += "\"merah\":{\"detected\":" + String(sensorMerah.detected ? "true" : "false") + ",\"raw\":" + String(sensorMerah.rawValue) + "},";
+  json += "\"biru\":{\"detected\":" + String(sensorBiru.detected ? "true" : "false") + ",\"raw\":" + String(sensorBiru.rawValue) + "},";
+  json += "\"kuning\":{\"detected\":" + String(sensorKuning.detected ? "true" : "false") + ",\"raw\":" + String(sensorKuning.rawValue) + "},";
+  json += "\"arm\":{\"detected\":" + String(sensorArm.detected ? "true" : "false") + ",\"raw\":" + String(sensorArm.rawValue) + "}";
+  json += "}";
   json += "}";
 
   server.send(200, "application/json", json);
@@ -392,7 +580,7 @@ void handleTest() {
 }
 
 // =========================================================================
-// 8. CALLBACKS BLE GATT (BLUETOOTH)
+// 10. CALLBACKS BLE GATT (BLUETOOTH)
 // =========================================================================
 class ServerCallbacks: public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) {
@@ -400,6 +588,13 @@ class ServerCallbacks: public BLEServerCallbacks {
     digitalWrite(PIN_LED_STATUS, HIGH);
     Serial.println("[BLE] Client terhubung!");
     notifyBLE("STATUS:READY\n");
+    
+    // Kirim status awal semua sensor secara lengkap saat koneksi terbentuk
+    sendSensorUpdate("merah", sensorMerah.detected, sensorMerah.rawValue);
+    sendSensorUpdate("biru", sensorBiru.detected, sensorBiru.rawValue);
+    sendSensorUpdate("kuning", sensorKuning.detected, sensorKuning.rawValue);
+    sendSensorUpdate("arm", sensorArm.detected, sensorArm.rawValue);
+    sendFullSensorState();
   }
 
   void onDisconnect(BLEServer* pServer) {
@@ -450,7 +645,7 @@ class CharCallbacks: public BLECharacteristicCallbacks {
 };
 
 // =========================================================================
-// 9. SETUP & LOOP UTAMA
+// 11. SETUP & LOOP UTAMA
 // =========================================================================
 void setup() {
   Serial.begin(115200);
@@ -458,9 +653,10 @@ void setup() {
 
   Serial.println("\n==============================================");
   Serial.println("  VERNOVA — ESP32 Dual Connection (Wi-Fi + BLE)");
+  Serial.println("  Firmware Sensor & Actuator v2.4.0");
   Serial.println("==============================================");
 
-  // Konfigurasi Pin Digital
+  // Konfigurasi Pin Digital Aktuator
   pinMode(PIN_LED_STATUS, OUTPUT);
   pinMode(PIN_MOTOR_ENA, OUTPUT);
   pinMode(PIN_MOTOR_IN, OUTPUT);
@@ -468,10 +664,10 @@ void setup() {
   digitalWrite(PIN_LED_STATUS, LOW);
 
   // Konfigurasi 4 Sensor Fisik
-  pinMode(PIN_SENSOR_MERAH, INPUT_PULLUP);
-  pinMode(PIN_SENSOR_BIRU, INPUT_PULLUP);
-  pinMode(PIN_SENSOR_KUNING, INPUT); // GPIO 35 input-only
-  pinMode(PIN_SENSOR_ARM, INPUT);    // GPIO 34 input-only
+  pinMode(PIN_SENSOR_MERAH, SENSOR_DIGITAL_MODE);
+  pinMode(PIN_SENSOR_BIRU, SENSOR_DIGITAL_MODE);
+  pinMode(PIN_SENSOR_KUNING, INPUT); // GPIO 35 input-only (ADC)
+  pinMode(PIN_SENSOR_ARM, INPUT);    // GPIO 34 input-only (ADC)
 
   // Konfigurasi PWM Servo ESP32
   ESP32PWM::allocateTimer(0);
@@ -480,8 +676,8 @@ void setup() {
   servoArm.setPeriodHertz(50);
   servoFlap.attach(PIN_SERVO_FLAP, 500, 2400);
   servoArm.attach(PIN_SERVO_ARM, 500, 2400);
-  servoFlap.write(90);
-  servoArm.write(20);
+  servoFlap.write(SERVO_STANDBY_ANGLE);
+  servoArm.write(SERVO_ARM_STANDBY_ANGLE);
 
   // 1. Inisialisasi Wi-Fi (SoftAP + Opsional Station)
   WiFi.mode(WIFI_AP_STA);
@@ -546,7 +742,7 @@ void loop() {
     oldBleConnected = bleConnected;
   }
 
-  // Update pembacaan sensor fisik dengan debounce
+  // Update pembacaan sensor fisik dengan debounce & emisi telemetri
   updateSensors();
 
   delay(2);

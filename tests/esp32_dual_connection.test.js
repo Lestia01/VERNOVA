@@ -280,4 +280,77 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     assert.equal(manager.getActiveAdapter().status, CONNECTION_STATES.DISCONNECTED);
   });
 
+  // 11. Parsing Telemetri Sensor JSON & Penyimpanan Nilai Mentah Kalibrasi
+  await t.test('11. Telemetri JSON sensor_update & sensor_state diparsing dan menyimpan raw value', async () => {
+    const espBle = new ESP32BLEAdapter({ simulationMode: true });
+    const receivedEvents = [];
+
+    espBle.onStatusChange((ev) => {
+      receivedEvents.push(ev);
+    });
+
+    // Kirim telemetri sensor digital (merah & biru)
+    espBle.receiveMockData('{"type":"sensor_update","sensor":"merah","detected":true,"value":0,"timestamp":1000}\n');
+    assert.equal(espBle.getSensorState().sensors.merah, true);
+    assert.equal(espBle.getSensorState().rawValues.merah, 0);
+    assert.equal(espBle.getSensorState().objectPresent, true);
+
+    espBle.receiveMockData('{"type":"sensor_update","sensor":"biru","detected":false,"value":1,"timestamp":1010}\n');
+    assert.equal(espBle.getSensorState().sensors.biru, false);
+    assert.equal(espBle.getSensorState().rawValues.biru, 1);
+
+    // Kirim telemetri sensor analog (kuning: ADC 12-bit & arm: ADC 12-bit)
+    espBle.receiveMockData('{"type":"sensor_update","sensor":"kuning","detected":true,"value":285,"timestamp":1020}\n');
+    assert.equal(espBle.getSensorState().sensors.kuning, true);
+    assert.equal(espBle.getSensorState().rawValues.kuning, 285);
+
+    espBle.receiveMockData('{"type":"sensor_update","sensor":"arm","detected":true,"value":150,"timestamp":1030}\n');
+    assert.equal(espBle.getSensorState().sensors.arm, true);
+    assert.equal(espBle.getSensorState().rawValues.arm, 150);
+
+    // Kirim status gabungan sensor_state
+    espBle.receiveMockData('{"type":"sensor_state","mode":"arm","sensors":{"merah":false,"biru":false,"kuning":true,"arm":false}}\n');
+    assert.equal(espBle.getSensorState().mode, 'arm');
+    assert.equal(espBle.getSensorState().sensors.merah, false);
+    assert.equal(espBle.getSensorState().sensors.kuning, true);
+    assert.equal(espBle.getSensorState().objectPresent, true);
+
+    // Pastikan tidak ada transaksi sortir palsu yang terpicu oleh sensor update
+    assert.ok(receivedEvents.every(e => e.type === 'sensor_telemetry' || e.type === 'sensor_state' || !e.type));
+  });
+
+  // 12. Rekonstruksi Paket BLE Terfragmentasi (MTU Chunk Reassembly)
+  await t.test('12. Rekonstruksi paket BLE terfragmentasi (MTU Chunk Reassembly) berbasis newline', async () => {
+    const espBle = new ESP32BLEAdapter({ simulationMode: true });
+    const receivedEvents = [];
+
+    espBle.onStatusChange((ev) => {
+      receivedEvents.push(ev);
+    });
+
+    // Simulasikan pesan JSON yang terpecah menjadi 3 chunk BLE berukuran ~20 byte
+    espBle.receiveMockData('{"type":"sensor_upda');
+    assert.equal(receivedEvents.length, 0); // Belum ada newline, masih dalam buffer
+
+    espBle.receiveMockData('te","sensor":"merah"');
+    assert.equal(receivedEvents.length, 0); // Masih dalam buffer
+
+    espBle.receiveMockData(',"detected":true,"value":0}\n');
+    // Sekarang newline ditemukan -> pesan harus diproses!
+    assert.equal(receivedEvents.length, 1);
+    assert.equal(receivedEvents[0].type, 'sensor_telemetry');
+    assert.equal(receivedEvents[0].sensor, 'merah');
+    assert.equal(receivedEvents[0].detected, true);
+    assert.equal(espBle.getSensorState().sensors.merah, true);
+
+    // Simulasikan pesan status terfragmentasi
+    espBle.receiveMockData('STATUS:OBJECT_');
+    assert.equal(receivedEvents.length, 1);
+
+    espBle.receiveMockData('DETECTED\n');
+    assert.equal(receivedEvents.length, 2);
+    assert.equal(receivedEvents[1].type, 'stage_update');
+    assert.equal(receivedEvents[1].stage, 'OBJECT_DETECTED');
+  });
+
 });
