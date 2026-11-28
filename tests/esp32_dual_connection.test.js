@@ -576,4 +576,84 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     assert.equal(stats.successRate, 75.0);
   });
 
+  // 22. Protokol Ringkas ESP32 BLE Compact Sensor (SENSOR:merah, SENSOR:kuning, SENSOR:biru, SENSOR:kosong) tanpa newline
+  await t.test('22. Protokol Ringkas ESP32 BLE Compact Sensor (SENSOR:merah, SENSOR:kosong) tanpa newline', () => {
+    const manager = new DeviceConnectionManager({ simulationMode: false, deviceType: 'ESP32_BLE' });
+    const espBle = manager.getActiveAdapter();
+    const notifications = [];
+    espBle.addListener(ev => notifications.push(ev));
+
+    // A. SENSOR:merah tanpa newline
+    espBle.receiveMockData('SENSOR:merah');
+    assert.equal(espBle.sensorState.sensors.merah, true);
+    assert.equal(espBle.sensorState.sensors.biru, false);
+    assert.equal(espBle.sensorState.sensors.kuning, false);
+    assert.equal(espBle.sensorState.objectPresent, true);
+    assert.equal(espBle.hasReceivedPhysicalData, true);
+
+    const telemEv = notifications.find(n => n.type === 'sensor_telemetry' && n.sensor === 'merah');
+    assert.ok(telemEv, 'Harus mengirim event sensor_telemetry untuk SENSOR:merah');
+    assert.equal(telemEv.detected, true);
+
+    // B. SENSOR:kosong tanpa newline
+    espBle.receiveMockData('SENSOR:kosong');
+    assert.equal(espBle.sensorState.sensors.merah, false);
+    assert.equal(espBle.sensorState.objectPresent, false);
+    const clearEv = notifications.find(n => n.type === 'sensor_telemetry' && n.sensor === 'all' && n.detected === false);
+    assert.ok(clearEv, 'Harus mengirim event sensor_telemetry untuk SENSOR:kosong');
+
+    // C. SENSOR:kuning
+    espBle.receiveMockData('SENSOR:kuning');
+    assert.equal(espBle.sensorState.sensors.kuning, true);
+    assert.equal(espBle.sensorState.objectPresent, true);
+  });
+
+  // 23. Mode Arm Protokol Ringkas (ARM:WAIT, ARM:SENSE, arm_sensor_detected_motor_stopped, DONE:servo)
+  await t.test('23. Mode Arm Protokol Ringkas (ARM:WAIT, ARM:SENSE, arm_sensor_detected_motor_stopped, DONE:servo)', async () => {
+    const manager = new DeviceConnectionManager({ simulationMode: false, deviceType: 'ESP32_BLE' });
+    const espBle = manager.getActiveAdapter();
+    const notifications = [];
+    espBle.addListener(ev => notifications.push(ev));
+    espBle._writeBLECommand = async () => true;
+
+    // A. ARM:WAIT:merah
+    espBle.receiveMockData('ARM:WAIT:merah');
+    assert.equal(espBle.sensorState.mode, 'arm');
+    assert.equal(espBle.lastArmColor, 'merah');
+    const waitEv = notifications.find(n => n.type === 'stage_update' && n.stage === 'arm_waiting_for_sensor_merah');
+    assert.ok(waitEv, 'Harus memicu stage_update arm_waiting_for_sensor_merah');
+
+    // B. ARM:SENSE:merah
+    espBle.receiveMockData('ARM:SENSE:merah');
+    assert.equal(espBle.sensorState.sensors.arm, true);
+    assert.equal(espBle.sensorState.objectPresent, true);
+    const senseEv = notifications.find(n => n.type === 'sort_completed' && n.sensor === 'arm' && n.color === 'merah');
+    assert.ok(senseEv, 'Harus memicu sort_completed untuk ARM:SENSE:merah');
+    assert.equal(senseEv.verified, true);
+
+    // C. arm_sensor_detected_motor_stopped
+    espBle.receiveMockData('STATUS mode=arm motor=off message=arm_sensor_detected_motor_stopped\n');
+    const motorStopEv = notifications.find(n => n.stage === 'arm_sensor_detected_motor_stopped');
+    assert.ok(motorStopEv, 'Harus memicu status arm_sensor_detected_motor_stopped');
+    assert.equal(motorStopEv.type, 'sort_completed');
+    assert.equal(motorStopEv.verified, true);
+    assert.equal(motorStopEv.color, 'merah');
+
+    // D. DONE:servo:kuning
+    espBle.receiveMockData('DONE:servo:kuning');
+    const doneEv = notifications.find(n => n.type === 'sort_completed' && n.color === 'kuning' && n.mode === 'servo');
+    assert.ok(doneEv, 'Harus mengenali DONE:servo:kuning');
+    assert.equal(doneEv.verified, true);
+
+    // E. Selesaikan transaksi sortir merah arm via dispatchSortingCommand
+    setTimeout(() => {
+      espBle.receiveMockData('ARM:SENSE:merah');
+    }, 50);
+    const res = await manager.dispatchSortingCommand({ color: 'merah', mode: 'Arm', force: true });
+    assert.equal(res.ok, true);
+    assert.equal(res.verified, true);
+    assert.equal(res.mode, 'Arm');
+    assert.equal(res.color, 'merah');
+  });
+
 });

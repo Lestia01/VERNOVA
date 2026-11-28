@@ -2367,7 +2367,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         if (state.excelLogs && state.excelLogs.length > 0) {
           const lastLog = state.excelLogs[state.excelLogs.length - 1];
           if (lastLog && !lastLog.verified) {
-            const isArmSensorDetection = (ev.sensor === 'arm' || ev.channel === 'ARM') && ev.detected;
+            const isArmSensorDetection = (ev.sensor === 'arm' || ev.channel === 'ARM' || (ev.stage && ev.stage.includes('arm_sense'))) && (ev.detected !== false);
             const matchesColor = confirmedColor && lastLog.warna && lastLog.warna.toLowerCase() === confirmedColor;
             const matchesArm = isArmSensorDetection && String(lastLog.mode || '').toLowerCase().includes('arm');
             const isSortCompletedForLog = ev.type === 'sort_completed' && (!ev.color || ev.color === lastLog.warna.toLowerCase());
@@ -2388,6 +2388,11 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
               if (typeof state.sortingData[classKey] === 'number') state.sortingData[classKey]++;
               if (typeof state.sortingData[colorKey] === 'number') state.sortingData[colorKey]++;
               if (targetMech === 'arm') state.sortingData.armTotal++; else state.sortingData.servoTotal++;
+
+              const attempts = (state.sortingData.totalVerified || state.sortingData.total) + (state.sortingData.unverifiedTotal || 0) + (state.sortingData.gagal || 0);
+              state.sortingData.totalAttempts = attempts;
+              state.sortingData.verifiedSuccessRate = attempts > 0 ? Number((((state.sortingData.totalVerified || state.sortingData.total) / attempts) * 100).toFixed(1)) : 0.0;
+              state.sortingData.successRateString = `${state.sortingData.verifiedSuccessRate.toFixed(1)}%`;
 
               // Update feed item pertama jika sesuai warna
               if (state.feeds && state.feeds.length > 0) {

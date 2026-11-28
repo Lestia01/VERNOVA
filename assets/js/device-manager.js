@@ -1111,8 +1111,9 @@
         const trimmed = this._rxBuffer.trim();
         const isCompleteJson = trimmed.startsWith('{') && trimmed.endsWith('}');
         const isColorWord = ['merah', 'kuning', 'biru', 'arm', 'kosong', 'none', 'clear'].includes(trimmed.toLowerCase());
+        const isCompactComplete = /^(SENSOR:(merah|kuning|biru|kosong)|ARM:(WAIT|SENSE):(merah|kuning|biru)|DONE:(servo|arm):(merah|kuning|biru)|ACK:[a-zA-Z0-9_:]+|ERR:[a-zA-Z0-9_]+|PONG)$/i.test(trimmed);
 
-        if (isCompleteJson || isColorWord || this._rxBuffer.length >= 256) {
+        if (isCompleteJson || isColorWord || isCompactComplete || this._rxBuffer.length >= 256) {
           this._rxBuffer = '';
           this._processIncomingLine(trimmed);
         } else {
@@ -1268,7 +1269,49 @@
         }
       }
 
-      // 3. Parsing Format Teks (Kompatibilitas Penuh micro:bit MakeCode BLE)
+      // 3. Parsing Format Teks & Compact Sensor (ESP32 BLE & MakeCode)
+      if (line.startsWith('ARM:WAIT:')) {
+        const col = line.replace(/^ARM:WAIT:/i, '').trim().toLowerCase();
+        this.hasReceivedPhysicalData = true;
+        this.sensorState.mode = 'arm';
+        this.lastArmColor = col;
+        this.lastPendingColor = col;
+        this._notify(this.status, `[ESP32 BLE Arm] Menunggu objek di sensor ARM (${col.toUpperCase()})`, {
+          type: 'stage_update',
+          stage: `arm_waiting_for_sensor_${col}`,
+          sensor: 'arm',
+          color: col,
+          mode: 'arm',
+          rawText: line
+        });
+        return;
+      }
+
+      if (line.startsWith('ARM:SENSE:')) {
+        const col = line.replace(/^ARM:SENSE:/i, '').trim().toLowerCase();
+        this.hasReceivedPhysicalData = true;
+        this.sensorState.mode = 'arm';
+        this.lastArmColor = col;
+        this.lastPendingColor = col;
+        this.sensorState.sensors.arm = true;
+        this.sensorState.channels.ARM = 'OBJECT_PRESENT';
+        this.sensorState.objectPresent = true;
+        this.sensorState.state = 'OBJECT_PRESENT';
+        this.sensorState.lastUpdate = new Date().toISOString();
+
+        this._notify(this.status, `[ESP32 BLE Arm] Objek ${col.toUpperCase()} terdeteksi di sensor ARM`, {
+          type: 'sort_completed',
+          stage: `arm_sense_${col}`,
+          sensor: 'arm',
+          color: col,
+          detected: true,
+          verified: true,
+          mode: 'arm',
+          rawText: line
+        });
+        return;
+      }
+
       if (line.includes('SENSOR:OBJECT_PRESENT')) {
         this.hasReceivedPhysicalData = true;
         this.sensorState.objectPresent = true;
@@ -1298,6 +1341,57 @@
       if (line.startsWith('SENSOR:')) {
         this.hasReceivedPhysicalData = true;
         const parts = line.split(':');
+        
+        // A. Format Ringkas ESP32: SENSOR:merah, SENSOR:kuning, SENSOR:biru, SENSOR:kosong
+        if (parts.length === 2) {
+          const val = parts[1].toLowerCase().trim();
+          this.sensorState.lastUpdate = new Date().toISOString();
+
+          if (val === 'kosong' || val === 'none' || val === 'clear') {
+            this.sensorState.sensors.merah = false;
+            this.sensorState.sensors.biru = false;
+            this.sensorState.sensors.kuning = false;
+            this.sensorState.channels.MERAH = 'OBJECT_ABSENT';
+            this.sensorState.channels.BIRU = 'OBJECT_ABSENT';
+            this.sensorState.channels.KUNING = 'OBJECT_ABSENT';
+            const anyArm = Boolean(this.sensorState.sensors.arm);
+            this.sensorState.objectPresent = anyArm;
+            this.sensorState.state = anyArm ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT';
+
+            this._notify(this.status, `[ESP32 BLE Sensor] Sensor Kosong (Standby)`, {
+              type: 'sensor_telemetry',
+              sensor: 'all',
+              detected: false,
+              sensorState: { ...this.sensorState },
+              rawText: line
+            });
+            return;
+          } else if (['merah', 'kuning', 'biru', 'arm'].includes(val)) {
+            this.sensorState.sensors[val] = true;
+            this.sensorState.channels[val.toUpperCase()] = 'OBJECT_PRESENT';
+            if (val !== 'arm') {
+              ['merah', 'kuning', 'biru'].forEach(c => {
+                if (c !== val) {
+                  this.sensorState.sensors[c] = false;
+                  this.sensorState.channels[c.toUpperCase()] = 'OBJECT_ABSENT';
+                }
+              });
+            }
+            this.sensorState.objectPresent = true;
+            this.sensorState.state = 'OBJECT_PRESENT';
+
+            this._notify(this.status, `[ESP32 BLE Sensor] Terdeteksi sensor ${val.toUpperCase()}`, {
+              type: 'sensor_telemetry',
+              sensor: val,
+              detected: true,
+              sensorState: { ...this.sensorState },
+              rawText: line
+            });
+            return;
+          }
+        }
+
+        // B. Format Lengkap micro:bit MakeCode: SENSOR:<CHANNEL>:<STATE>
         if (parts.length >= 3) {
           const channel = parts[1].toUpperCase().trim();
           const channelLower = parts[1].toLowerCase().trim();
@@ -1320,6 +1414,7 @@
             type: 'sensor_telemetry',
             channel,
             sensor: channelLower,
+            detected: isPresent,
             sensorState: { ...this.sensorState },
             rawText: line
           });
@@ -1353,8 +1448,28 @@
         if (stage.includes('kuning')) finishedColor = 'kuning';
         else if (stage.includes('biru')) finishedColor = 'biru';
         else if (stage.includes('merah')) finishedColor = 'merah';
+        else if (isSortCompleted && (this.lastArmColor || this.lastPendingColor)) {
+          finishedColor = this.lastArmColor || this.lastPendingColor;
+        }
 
         if (modeParam) this.sensorState.mode = modeParam.toLowerCase();
+
+        // Update status fisik sensor arm dari pesan motor/sensor
+        if (stage.includes('arm_sensor_detected') || stage.includes('arm_sensor_biru_pass_through')) {
+          this.sensorState.sensors.arm = true;
+          this.sensorState.channels.ARM = 'OBJECT_PRESENT';
+          this.sensorState.objectPresent = true;
+          this.sensorState.state = 'OBJECT_PRESENT';
+          this.hasReceivedPhysicalData = true;
+          this.sensorState.lastUpdate = new Date().toISOString();
+        } else if (stage.includes('arm_sensor_cleared')) {
+          this.sensorState.sensors.arm = false;
+          this.sensorState.channels.ARM = 'OBJECT_ABSENT';
+          const any = Object.entries(this.sensorState.sensors).some(([k, v]) => k !== 'arm' && Boolean(v));
+          this.sensorState.objectPresent = any;
+          this.sensorState.state = any ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT';
+          this.sensorState.lastUpdate = new Date().toISOString();
+        }
 
         this._notify(this.status, `[ESP32 BLE Status] ${stage}`, {
           type: isSortCompleted ? 'sort_completed' : 'stage_update',
@@ -1370,18 +1485,54 @@
       }
 
       if (line.startsWith('DONE:') || line.startsWith('DONE ') || line === 'DONE') {
-        let col = line.replace(/^DONE[:\s]*/i, '').trim().toLowerCase();
-        this._notify(this.status, `[ESP32 BLE Done] Sortir ${col || 'selesai'}`, {
+        let rawDone = line.replace(/^DONE[:\s]*/i, '').trim().toLowerCase();
+        let doneMode = null;
+        let col = rawDone;
+        if (rawDone.includes('servo:')) {
+          doneMode = 'servo';
+          col = rawDone.replace('servo:', '').trim();
+        } else if (rawDone.includes('arm:')) {
+          doneMode = 'arm';
+          col = rawDone.replace('arm:', '').trim();
+        }
+        if (!['merah', 'kuning', 'biru'].includes(col)) {
+          col = this.lastArmColor || this.lastPendingColor || null;
+        }
+        this._notify(this.status, `[ESP32 BLE Done] Sortir ${col || 'selesai'} (${doneMode || this.sensorState.mode})`, {
           type: 'sort_completed',
           color: col || null,
-          stage: `sort_${col || 'selesai'}_done`,
+          mode: doneMode || this.sensorState.mode,
+          stage: `sort_${doneMode || 'servo'}_${col || 'selesai'}_done`,
           verified: true,
           rawText: line
         });
         return;
       }
 
-      // 5. Notifikasi umum lainnya (ACK, DONE, dsb.)
+      // 5. Notifikasi ACK dan Error
+      if (line.startsWith('ACK:') || line.startsWith('ACK ')) {
+        const ackVal = line.replace(/^ACK[:\s]*/i, '').trim();
+        this.lastAck = { raw: line, value: ackVal, timestamp: new Date().toISOString() };
+        this._notify(this.status, `[ESP32 BLE ACK] ${ackVal}`, {
+          type: 'ack',
+          ack: ackVal,
+          rawText: line
+        });
+        return;
+      }
+
+      if (line.startsWith('ERR:') || line.startsWith('ERR ')) {
+        const errVal = line.replace(/^ERR[:\s]*/i, '').trim();
+        this.lastError = errVal;
+        this._notify(this.status, `[ESP32 BLE Error] ${errVal}`, {
+          type: 'error',
+          error: errVal,
+          rawText: line
+        });
+        return;
+      }
+
+      // 6. Notifikasi umum lainnya
       this._notify(this.status, `[ESP32 BLE RX] ${line}`, { rawText: line });
     }
 
@@ -1486,6 +1637,8 @@
       }
 
       // Kasus B: Hardware Nyata via BLE GATT UART (Mengirim data warna dan mekanisme: misal "merah servo" / "merah arm")
+      this.lastPendingColor = color;
+      if (modeStr === 'arm') this.lastArmColor = color;
       this._notify(CONNECTION_STATES.BUSY, `Mengirim ke ESP32 BLE: "${fullCmd}"...`);
       try {
         let isPhysicallyVerified = false;
@@ -1506,11 +1659,17 @@
               completionDetail = 'Sensor ARM terdeteksi';
             }
           }
-          // 2. Konfirmasi status selesai sortir dari firmware (sort_servo_kuning_done, sort_servo_merah_done, sort_arm_..., arm_object_..., DONE:, dsb.)
-          if (ev.type === 'sort_completed' || (ev.stage && (
-            (ev.stage.includes(color) && (ev.stage.includes('done') || ev.stage.includes('stopped') || ev.stage.includes('pass_through') || ev.stage.includes('detected'))) ||
+          // 2. Konfirmasi status selesai sortir dari firmware (sort_servo_kuning_done, sort_servo_merah_done, sort_arm_..., arm_object_..., DONE:, ARM:SENSE:, dsb.)
+          if (ev.type === 'sort_completed') {
+            if (!ev.color || ev.color === color) {
+              isPhysicallyVerified = true;
+              completionDetail = ev.stage || 'Sortir selesai';
+            }
+          } else if (ev.stage && (
+            (ev.stage.includes(color) && (ev.stage.includes('done') || ev.stage.includes('stopped') || ev.stage.includes('pass_through') || ev.stage.includes('detected') || ev.stage.includes('sense'))) ||
+            (modeStr === 'arm' && (ev.stage.includes('arm_sensor_detected') || ev.stage.includes('arm_sensor_cleared') || ev.stage.includes('arm_sense'))) ||
             ev.stage.includes('SERVO_DONE') || ev.stage.includes('ARM_DONE') || ev.stage.includes('READY') || ev.stage.includes('DONE')
-          ))) {
+          )) {
             isPhysicallyVerified = true;
             completionDetail = ev.stage || 'Sortir selesai';
           }
