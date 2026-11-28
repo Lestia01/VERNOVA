@@ -2334,40 +2334,63 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       // Upgrade status transaksi terakhir ke TERVERIFIKASI FISIK jika sinyal sensor / status selesai diterima
       if (ev && (ev.type === 'sort_completed' || (ev.type === 'sensor_telemetry' && ev.detected))) {
         const confirmedColor = (ev.color || (ev.sensor !== 'all' ? ev.sensor : null) || '').toLowerCase();
-        if (confirmedColor && state.excelLogs && state.excelLogs.length > 0) {
+        if (state.excelLogs && state.excelLogs.length > 0) {
           const lastLog = state.excelLogs[state.excelLogs.length - 1];
-          if (lastLog && !lastLog.verified && lastLog.warna && lastLog.warna.toLowerCase() === confirmedColor) {
-            lastLog.verified = true;
-            lastLog.sensorVerified = true;
-            lastLog.status = 'Berhasil (Terverifikasi)';
-            lastLog.statusCategory = 'verified';
-            lastLog.nilai = 1;
+          if (lastLog && !lastLog.verified) {
+            const isArmSensorDetection = (ev.sensor === 'arm' || ev.channel === 'ARM') && ev.detected;
+            const matchesColor = confirmedColor && lastLog.warna && lastLog.warna.toLowerCase() === confirmedColor;
+            const matchesArm = isArmSensorDetection && String(lastLog.mode || '').toLowerCase().includes('arm');
+            const isSortCompletedForLog = ev.type === 'sort_completed' && (!ev.color || ev.color === lastLog.warna.toLowerCase());
 
-            if (state.sortingData.unverifiedTotal > 0) state.sortingData.unverifiedTotal--;
-            state.sortingData.totalVerified++;
-            state.sortingData.total++;
-            const targetMech = (String(lastLog.mode || '').toLowerCase().includes('arm')) ? 'arm' : 'servo';
-            const classKey = `${confirmedColor}_${targetMech}`;
-            if (typeof state.sortingData[classKey] === 'number') state.sortingData[classKey]++;
-            if (typeof state.sortingData[confirmedColor] === 'number') state.sortingData[confirmedColor]++;
+            if (matchesColor || matchesArm || isSortCompletedForLog) {
+              lastLog.verified = true;
+              lastLog.sensorVerified = true;
+              lastLog.status = 'Berhasil (Terverifikasi)';
+              lastLog.statusCategory = 'verified';
+              lastLog.nilai = 1;
 
-            // Update feed item pertama jika sesuai warna
-            if (state.feeds && state.feeds.length > 0) {
-              const f = state.feeds[0];
-              if (f.title && f.title.toLowerCase().includes(confirmedColor)) {
-                f.title = `${lastLog.warna} Tersortir (TERVERIFIKASI)`;
-                f.icon = 'fas fa-circle-check';
+              if (state.sortingData.unverifiedTotal > 0) state.sortingData.unverifiedTotal--;
+              state.sortingData.totalVerified++;
+              state.sortingData.total++;
+              const colorKey = lastLog.warna.toLowerCase();
+              const targetMech = (String(lastLog.mode || '').toLowerCase().includes('arm')) ? 'arm' : 'servo';
+              const classKey = `${colorKey}_${targetMech}`;
+              if (typeof state.sortingData[classKey] === 'number') state.sortingData[classKey]++;
+              if (typeof state.sortingData[colorKey] === 'number') state.sortingData[colorKey]++;
+              if (targetMech === 'arm') state.sortingData.armTotal++; else state.sortingData.servoTotal++;
+
+              // Update feed item pertama jika sesuai warna
+              if (state.feeds && state.feeds.length > 0) {
+                const f = state.feeds[0];
+                if (f.title && f.title.toLowerCase().includes(colorKey)) {
+                  f.title = `${lastLog.warna} Tersortir (TERVERIFIKASI)`;
+                  f.icon = 'fas fa-circle-check';
+                }
               }
-            }
 
-            if (typeof updateUIStats === 'function') updateUIStats();
-            if (typeof updateChart === 'function') updateChart();
-            if (typeof renderFeed === 'function') renderFeed();
+              if (typeof updateUIStats === 'function') updateUIStats();
+              if (typeof updateChart === 'function') updateChart();
+              if (typeof renderFeed === 'function') renderFeed();
 
-            const manVerif = $('man-verif-pill');
-            if (manVerif) {
-              manVerif.innerText = `VERIFIKASI: VALID SENSOR (${confirmedColor.toUpperCase()})`;
-              manVerif.className = 'pill green font-bold';
+              // Sinkronisasi pembaruan retroaktif ke Firebase Realtime Database
+              if (lastLog.firebaseKey && state.db) {
+                try {
+                  const fbCat = lastLog.firebaseCategory || colorKey;
+                  update(ref(state.db, `${state.currentPath}/${fbCat}/${lastLog.firebaseKey}`), {
+                    verified: true,
+                    verificationStatus: 'verified',
+                    statusCategory: 'verified',
+                    status: 'Berhasil (Terverifikasi)',
+                    value: 1
+                  }).catch(e => console.warn('Firebase retroactive sync error:', e));
+                } catch (err) {}
+              }
+
+              const manVerif = $('man-verif-pill');
+              if (manVerif) {
+                manVerif.innerText = `VERIFIKASI: VALID SENSOR (${lastLog.warna.toUpperCase()} - ${targetMech.toUpperCase()})`;
+                manVerif.className = 'pill green font-bold';
+              }
             }
           }
         }
@@ -2907,6 +2930,9 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     const btnSend = $('btn-manual-send');
     if (btnSend) btnSend.disabled = true;
 
+    state.pendingMode = mode;
+    state.pendingStartTime = Date.now();
+
     showToast(`Mengirim perintah manual: ${color.toUpperCase()} (${mode.toUpperCase()})...`);
     logActivity("fas fa-paper-plane", "background:rgba(59,130,246,.15);color:#3b82f6", "Manual Sort Sent", `${color} -> ${mode}`);
 
@@ -3261,13 +3287,15 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             state.isCoolingDown = true;
             state.pendingDetection = topDet.color;
             state.pendingStartTime = Date.now();
-            state.pendingMode = $('mode-selector').value;
+            const detectedMech = topDet.mechanism ? (topDet.mechanism === 'arm' ? 'Arm' : 'Servo') : (String(topDet.class_name || '').toLowerCase().includes('arm') ? 'Arm' : $('mode-selector').value);
+            state.pendingMode = detectedMech;
 
             state.timeoutTimer = setTimeout(() => { executeTimeout(topDet.color); }, 12000);
 
             window.deviceManager.dispatchSortingCommand({
               color: topDet.color,
               mode: state.pendingMode,
+              mechanism: state.pendingMode,
               objectType: 'CYLINDER_CAP',
               engine: 'yolo',
               confidence: topDet.confidence
@@ -3335,7 +3363,10 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         state.isCoolingDown = true;
         state.pendingDetection = colorCode;
         state.pendingStartTime = Date.now();
-        state.pendingMode = $('mode-selector').value;
+        let detectedMech = $('mode-selector').value;
+        if (cLower.includes('arm')) detectedMech = 'Arm';
+        else if (cLower.includes('servo')) detectedMech = 'Servo';
+        state.pendingMode = detectedMech;
 
         // Watchdog timeout 12s
         state.timeoutTimer = setTimeout(() => { executeTimeout(colorCode); }, 12000);
@@ -3344,6 +3375,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         window.deviceManager.dispatchSortingCommand({
           color: colorCode,
           mode: state.pendingMode,
+          mechanism: state.pendingMode,
           objectType: 'CYLINDER_CAP'
         }).then(res => {
           if (res && res.ok) {
@@ -3448,25 +3480,32 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     state.pendingMode = null;
     setTimeout(() => { state.isCoolingDown = false; }, 1000);
 
-    const currentMode = startedMode || $('mode-selector').value;
-    const targetMech = (String(currentMode || '').toLowerCase().includes('arm')) ? 'arm' : 'servo';
+    const detectedMech = (espRes.mode || espRes.mechanism || startedMode || $('mode-selector')?.value || 'Servo');
+    const currentMode = String(detectedMech).toLowerCase().includes('arm') ? 'Arm' : 'Servo';
+    const targetMech = currentMode.toLowerCase();
+
+    let baseColor = String(category || '').toLowerCase().trim();
+    if (baseColor.includes('kuning') || baseColor.includes('yellow')) baseColor = 'kuning';
+    else if (baseColor.includes('biru') || baseColor.includes('blue')) baseColor = 'biru';
+    else if (baseColor.includes('merah') || baseColor.includes('red')) baseColor = 'merah';
+
     const txObj = espRes.transaction || {};
     const isVerified = Boolean(espRes.verified || txObj.verified || espRes.sensorVerified);
     const statusCat = espRes.statusCategory || txObj.statusCategory || (isVerified ? 'verified' : 'completed_unverified');
 
     // Revisi Distribusi: HANYA transaksi TERVERIFIKASI FISIK yang menambah nilai distribusi!
+    const classKey = `${baseColor}_${targetMech}`;
     if (isVerified) {
-      const classKey = `${category}_${targetMech}`;
       if (typeof state.sortingData[classKey] === 'number') state.sortingData[classKey]++;
-      if (typeof state.sortingData[category] === 'number') state.sortingData[category]++;
+      if (typeof state.sortingData[baseColor] === 'number') state.sortingData[baseColor]++;
       if (targetMech === 'arm') state.sortingData.armTotal++; else state.sortingData.servoTotal++;
       state.sortingData.totalVerified++;
       state.sortingData.total++;
     } else {
       // Transaksi COMPLETED_UNVERIFIED: tidak menambah distribusi keberhasilan warna / mekanisme
       state.sortingData.unverifiedTotal++;
-      if (state.sortingData.unverified && typeof state.sortingData.unverified[category] === 'number') {
-        state.sortingData.unverified[category]++;
+      if (state.sortingData.unverified && typeof state.sortingData.unverified[baseColor] === 'number') {
+        state.sortingData.unverified[baseColor]++;
       }
       if (state.sortingData.unverified && typeof state.sortingData.unverified[targetMech] === 'number') {
         state.sortingData.unverified[targetMech]++;
@@ -3482,7 +3521,7 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
     const now = new Date(nowMs);
     const timeStr = now.toLocaleTimeString('id-ID');
     const dateTimeStr = formatDateTime(now);
-    const properColorName = category.charAt(0).toUpperCase() + category.slice(1);
+    const properColorName = baseColor.charAt(0).toUpperCase() + baseColor.slice(1);
     const execStatus = espRes.executionStatus || (window.esp32Client.isSimulated() ? 'simulated_esp32' : 'confirmed_esp32_wifi');
     const espDeviceId = espRes.esp32DeviceId || (window.esp32Client.lastTelemetry && window.esp32Client.lastTelemetry.deviceId) || 'VERNOVA-ESP32';
     const cmdId = espRes.commandId || `CMD_${nowMs}`;
@@ -3490,31 +3529,10 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       ? window.deviceManager.getOperatingMode()
       : ((window.deviceManager && window.deviceManager.operatingMode) || 'AUTO');
 
-    state.excelLogs.push({
-      datetime: dateTimeStr,
-      timestamp: timeStr,
-      warna: properColorName,
-      mode: currentMode,
-      sortingMode: opMode,
-      transactionId: cmdId,
-      statusCategory: statusCat,
-      verified: isVerified,
-      status: isVerified ? "Berhasil (Terverifikasi)" : "Berhasil (Belum Terverifikasi Fisik)",
-      duration: formatDuration(durationMs),
-      durationMs: durationMs || 0,
-      nilai: isVerified ? 1 : 0
-    });
-
-    updateUIStats(); updateChart();
-
-    pushFeed({ icon: isVerified ? 'fas fa-circle-check' : 'fas fa-check', style: feedStyleFor(category),
-      title: `${properColorName} Tersortir (${isVerified ? 'TERVERIFIKASI' : 'BELUM TERVERIFIKASI FISIK'})`,
-      desc: `${dateTimeStr} · ${currentMode} · ${formatDuration(durationMs)} · ${opMode}`,
-      ts: nowMs, kind: 'data', key: `ok|${category}|${nowMs}|${currentMode}` });
-
+    let pushedFbKey = null;
     if (state.db) {
       try {
-        await push(ref(state.db, `${state.currentPath}/${category}`), {
+        const recordRef = await push(ref(state.db, `${state.currentPath}/${baseColor}`), {
           runId: `sort_${nowMs}_${Math.random().toString(36).slice(2, 7)}`,
           commandId: cmdId,
           transactionId: cmdId,
@@ -3537,12 +3555,40 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
           verified: isVerified,
           executionStatus: execStatus,
           sortResult: 'success',
-          status: isVerified ? 'Berhasil (Terverifikasi)' : 'Berhasil (Belum Terverifikasi Fisik)',
+          status: isVerified ? "Berhasil (Terverifikasi)" : "Berhasil (Belum Terverifikasi Fisik)",
           duration: durationMs || 0,
           durationMs: durationMs || 0,
-          value: 1
+          value: isVerified ? 1 : 0
         });
-      } catch (e) {}
+        if (recordRef && recordRef.key) pushedFbKey = recordRef.key;
+      } catch (e) {
+        console.warn('Firebase push error:', e);
+      }
+    }
+
+    state.excelLogs.push({
+      datetime: dateTimeStr,
+      timestamp: timeStr,
+      warna: properColorName,
+      mode: currentMode,
+      sortingMode: opMode,
+      transactionId: cmdId,
+      statusCategory: statusCat,
+      verified: isVerified,
+      status: isVerified ? "Berhasil (Terverifikasi)" : "Berhasil (Belum Terverifikasi Fisik)",
+      duration: formatDuration(durationMs),
+      durationMs: durationMs || 0,
+      nilai: isVerified ? 1 : 0,
+      firebaseKey: pushedFbKey,
+      firebaseCategory: baseColor
+    });
+
+    updateUIStats(); updateChart();
+
+    pushFeed({ icon: isVerified ? 'fas fa-circle-check' : 'fas fa-check', style: feedStyleFor(baseColor),
+      title: `${properColorName} Tersortir (${isVerified ? 'TERVERIFIKASI' : 'BELUM TERVERIFIKASI FISIK'})`,
+      desc: `${dateTimeStr} · ${currentMode} · ${formatDuration(durationMs)} · ${opMode}`,
+      ts: nowMs, kind: 'data', key: `ok|${baseColor}|${nowMs}|${currentMode}` });
     }
   }
 

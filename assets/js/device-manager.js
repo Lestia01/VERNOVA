@@ -84,33 +84,75 @@
   function aggregateSortingDistribution(entries = []) {
     const list = Array.isArray(entries) ? entries : Object.values(entries || {});
     const summary = {
+      merah_arm: 0,
+      kuning_arm: 0,
+      biru_arm: 0,
+      merah_servo: 0,
+      kuning_servo: 0,
+      biru_servo: 0,
       kuning: 0,
       biru: 0,
       merah: 0,
+      armTotal: 0,
+      servoTotal: 0,
       total: 0,
+      totalVerified: 0,
+      unverifiedTotal: 0,
+      unverified: { merah: 0, kuning: 0, biru: 0, arm: 0, servo: 0 },
       gagal: 0,
+      totalAttempts: 0,
       successRate: 0.0,
+      verifiedSuccessRate: 0.0,
       successRateString: '0.0%'
     };
 
     list.forEach(entry => {
       if (!entry) return;
       const status = String(entry.status || '').toUpperCase();
-      const color = String(entry.warna || entry.color || '').toLowerCase();
+      const statusCat = String(entry.statusCategory || entry.verificationStatus || '').toLowerCase();
+      const rawColor = String(entry.warna || entry.detectedColor || entry.color || '').toLowerCase().trim();
+      let color = null;
+      if (rawColor.includes('kuning') || rawColor.includes('yellow')) color = 'kuning';
+      else if (rawColor.includes('biru') || rawColor.includes('blue')) color = 'biru';
+      else if (rawColor.includes('merah') || rawColor.includes('red')) color = 'merah';
 
-      if (status === 'COMPLETED' || status === 'CONFIRMED' || status === 'SUCCESS' || status === 'VERIFIED') {
-        if (summary[color] !== undefined) {
-          summary[color]++;
-        }
-        summary.total++;
-      } else if (status === 'FAILED' || status === 'ERROR' || status === 'TIMEOUT' || status === 'MISSORT') {
+      const rawMech = String(entry.mechanism || entry.mode || (rawColor.includes('arm') ? 'arm' : 'servo')).toLowerCase();
+      const mech = rawMech.includes('arm') ? 'arm' : 'servo';
+
+      const isLegacyVerified = (status === 'COMPLETED' || status === 'CONFIRMED' || status === 'SUCCESS' || status === 'VERIFIED');
+      const isExplicitVerified = Boolean(
+        entry.verified === true ||
+        entry.sensorVerified === true ||
+        statusCat === 'verified' ||
+        (status.includes('TERVERIFIKASI') && !status.includes('BELUM'))
+      );
+      const isVerified = isExplicitVerified || isLegacyVerified;
+
+      const isFailed = status.includes('FAIL') || status.includes('ERROR') || status.includes('TIMEOUT') || status.includes('MISSORT');
+
+      if (isFailed) {
         summary.gagal++;
+      } else if (color) {
+        if (isVerified) {
+          if (summary[color] !== undefined) summary[color]++;
+          const classKey = `${color}_${mech}`;
+          if (summary[classKey] !== undefined) summary[classKey]++;
+          if (mech === 'arm') summary.armTotal++; else summary.servoTotal++;
+          summary.totalVerified++;
+          summary.total++;
+        } else {
+          summary.unverifiedTotal++;
+          if (summary.unverified[color] !== undefined) summary.unverified[color]++;
+          if (summary.unverified[mech] !== undefined) summary.unverified[mech]++;
+        }
       }
     });
 
-    const attempts = summary.total + summary.gagal;
+    const attempts = summary.total + (summary.unverifiedTotal || 0) + summary.gagal;
+    summary.totalAttempts = attempts;
     if (attempts > 0) {
       summary.successRate = Number(((summary.total / attempts) * 100).toFixed(1));
+      summary.verifiedSuccessRate = summary.successRate;
       summary.successRateString = `${summary.successRate}%`;
     }
 
@@ -1306,7 +1348,7 @@
         }
 
         // Deteksi apakah pesan status ini mengindikasikan penyortiran selesai
-        const isSortCompleted = stage.includes('_done') || stage.includes('pass_through') || stage.includes('detected_motor_stopped') || stage.includes('DONE');
+        const isSortCompleted = stage.includes('_done') || stage.includes('pass_through') || stage.includes('detected_motor_stopped') || stage.includes('SERVO_DONE') || stage.includes('ARM_DONE') || stage.includes('DONE');
         let finishedColor = null;
         if (stage.includes('kuning')) finishedColor = 'kuning';
         else if (stage.includes('biru')) finishedColor = 'biru';
@@ -1411,7 +1453,10 @@
         throw new Error(`Warna tidak valid: "${params.color}". Harus salah satu dari: ${VALID_COLORS.join(', ')}`);
       }
 
-      const rawMode = params.mode || params.mechanism || 'Servo';
+      let rawMode = params.mode || params.mechanism || '';
+      if (!rawMode && rawColor.includes('arm')) rawMode = 'Arm';
+      if (!rawMode && rawColor.includes('servo')) rawMode = 'Servo';
+      if (!rawMode) rawMode = 'Servo';
       const mode = String(rawMode).toLowerCase().includes('arm') ? 'Arm' : 'Servo';
       const modeStr = mode.toLowerCase();
       const commandId = params.commandId || `CMD_ESP_BLE_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -1455,9 +1500,17 @@
               isPhysicallyVerified = true;
               completionDetail = `Sensor ${color.toUpperCase()} terdeteksi`;
             }
+            // Dalam mode Arm, deteksi sensor ARM GPIO 34 adalah bukti fisik objek mencapai lengan robot
+            if (modeStr === 'arm' && (ev.sensor === 'arm' || ev.channel === 'ARM' || ev.sensorState?.sensors?.arm) && ev.detected) {
+              isPhysicallyVerified = true;
+              completionDetail = 'Sensor ARM terdeteksi';
+            }
           }
-          // 2. Konfirmasi status selesai sortir dari firmware (sort_servo_kuning_done, DONE:, dsb.)
-          if (ev.type === 'sort_completed' || (ev.stage && ev.stage.includes(color) && (ev.stage.includes('done') || ev.stage.includes('stopped') || ev.stage.includes('pass_through')))) {
+          // 2. Konfirmasi status selesai sortir dari firmware (sort_servo_kuning_done, sort_servo_merah_done, sort_arm_..., arm_object_..., DONE:, dsb.)
+          if (ev.type === 'sort_completed' || (ev.stage && (
+            (ev.stage.includes(color) && (ev.stage.includes('done') || ev.stage.includes('stopped') || ev.stage.includes('pass_through') || ev.stage.includes('detected'))) ||
+            ev.stage.includes('SERVO_DONE') || ev.stage.includes('ARM_DONE') || ev.stage.includes('READY') || ev.stage.includes('DONE')
+          ))) {
             isPhysicallyVerified = true;
             completionDetail = ev.stage || 'Sortir selesai';
           }
@@ -1466,7 +1519,8 @@
         await this._writeBLECommand(fullCmd);
 
         // Tunggu respons/konfirmasi sensor fisik atau status selesai dari ESP32
-        const maxWaitMs = params.waitForConfirmation === false ? 0 : (modeStr === 'arm' ? 3500 : 2500);
+        // Mode servo merah membutuhkan delay(3000ms) di firmware, mode arm membutuhkan waktu perjalanan belt
+        const maxWaitMs = params.waitForConfirmation === false ? 0 : (modeStr === 'arm' ? 8000 : 4500);
         const checkInterval = 50;
         let waitedMs = 0;
 
@@ -1808,8 +1862,17 @@
      * Dispatch Perintah Sortir dengan Perlindungan Debounce
      */
     async dispatchSortingCommand(params = {}) {
-      const color = String(params.color || params || '').toLowerCase().trim();
-      const rawMode = params.mode || params.mechanism || 'Servo';
+      const rawColor = String(params.color || params || '').toLowerCase().trim();
+      let color = null;
+      if (rawColor.includes('kuning') || rawColor.includes('yellow')) color = 'kuning';
+      else if (rawColor.includes('biru') || rawColor.includes('blue')) color = 'biru';
+      else if (rawColor.includes('merah') || rawColor.includes('red')) color = 'merah';
+      else color = rawColor;
+
+      let rawMode = params.mode || params.mechanism || '';
+      if (!rawMode && (rawColor.includes('arm') || rawColor.includes('lengan'))) rawMode = 'Arm';
+      if (!rawMode && (rawColor.includes('servo') || rawColor.includes('flap'))) rawMode = 'Servo';
+      if (!rawMode) rawMode = 'Servo';
       const mode = String(rawMode).toLowerCase().includes('arm') ? 'Arm' : 'Servo';
       const now = Date.now();
 
@@ -1828,6 +1891,7 @@
       return await this.adapter.sendSortingCommand({
         color,
         mode,
+        mechanism: mode,
         objectType: params.objectType || 'CYLINDER_CAP',
         commandId: params.commandId
       });

@@ -30,7 +30,8 @@ const {
   MicrobitBLEAdapter,
   ESP32WiFiAdapter,
   ESP32BLEAdapter,
-  DeviceConnectionManager
+  DeviceConnectionManager,
+  aggregateSortingDistribution
 } = require('../assets/js/device-manager.js');
 
 test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) => {
@@ -473,6 +474,106 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     assert.equal(res.sensorVerified, true);
     assert.equal(res.statusCategory, 'verified');
     assert.equal(res.color, 'kuning');
+  });
+
+  // 19. Verifikasi sortir Merah Servo berhasil terverifikasi fisik
+  await t.test('19. Sortir Merah Servo terverifikasi fisik dengan respons sort_servo_merah_done', async () => {
+    const espBle = new ESP32BLEAdapter({ simulationMode: false });
+    let writtenCommand = null;
+    espBle._writeBLECommand = async (cmd) => {
+      writtenCommand = cmd;
+      return true;
+    };
+
+    // Firmware Arduino mengeksekusi delay 3000ms untuk merah servo lalu mengirim sort_servo_merah_done
+    setTimeout(() => {
+      espBle.receiveMockData('STATUS mode=servo motor=on message=sort_servo_merah_done\n');
+    }, 80);
+
+    const res = await espBle.sendSortingCommand({ color: 'merah', mode: 'Servo' });
+    assert.equal(writtenCommand, 'merah servo');
+    assert.equal(res.ok, true);
+    assert.equal(res.verified, true);
+    assert.equal(res.sensorVerified, true);
+    assert.equal(res.statusCategory, 'verified');
+    assert.equal(res.color, 'merah');
+    assert.equal(res.mode, 'Servo');
+  });
+
+  // 20. Verifikasi Perintah Mode Arm (merah_arm, kuning_arm, biru_arm) & Konfirmasi Sensor ARM
+  await t.test('20. Mode Arm (merah_arm, kuning_arm, biru_arm) terurai & terverifikasi fisik', async () => {
+    const manager = new DeviceConnectionManager({ simulationMode: false, deviceType: 'ESP32_BLE' });
+    const espBle = manager.getActiveAdapter();
+    const sentCommands = [];
+    espBle._writeBLECommand = async (cmd) => {
+      sentCommands.push(cmd);
+      return true;
+    };
+
+    // A. Uji merah_arm didekomposisi menjadi color=merah & mode=Arm
+    setTimeout(() => {
+      espBle.receiveMockData('STATUS mode=arm motor=off message=arm_object_merah_detected_motor_stopped\n');
+    }, 50);
+    const resMerahArm = await manager.dispatchSortingCommand({ color: 'merah_arm', force: true });
+    assert.equal(sentCommands[0], 'merah arm');
+    assert.equal(resMerahArm.ok, true);
+    assert.equal(resMerahArm.verified, true);
+    assert.equal(resMerahArm.statusCategory, 'verified');
+    assert.equal(resMerahArm.color, 'merah');
+    assert.equal(resMerahArm.mode, 'Arm');
+
+    // B. Uji kuning_arm terverifikasi via deteksi sensor fisik ARM
+    setTimeout(() => {
+      espBle.receiveMockData('{"type":"sensor_update","sensor":"arm","detected":true,"value":180}\n');
+    }, 50);
+    const resKuningArm = await manager.dispatchSortingCommand({ color: 'kuning_arm', force: true });
+    assert.equal(sentCommands[1], 'kuning arm');
+    assert.equal(resKuningArm.ok, true);
+    assert.equal(resKuningArm.verified, true);
+    assert.equal(resKuningArm.mode, 'Arm');
+
+    // C. Uji biru_arm terverifikasi via sinyal arm_object_biru_pass_through
+    setTimeout(() => {
+      espBle.receiveMockData('STATUS mode=arm motor=on message=arm_object_biru_pass_through\n');
+    }, 50);
+    const resBiruArm = await manager.dispatchSortingCommand({ color: 'biru_arm', force: true });
+    assert.equal(sentCommands[2], 'biru arm');
+    assert.equal(resBiruArm.ok, true);
+    assert.equal(resBiruArm.verified, true);
+    assert.equal(resBiruArm.mode, 'Arm');
+  });
+
+  // 21. Agregasi Statistik Lengkap untuk Mode Arm dan Servo
+  await t.test('21. Agregasi statistik mempopulasi merah_arm, kuning_arm, biru_arm, armTotal & servoTotal', () => {
+    const rawCloudEntries = [
+      { warna: 'Merah', mode: 'Arm', verified: true },
+      { warna: 'Kuning', mode: 'Arm', verified: true },
+      { warna: 'Biru', mode: 'Arm', verified: true },
+      { warna: 'Merah', mode: 'Servo', verified: true },
+      { warna: 'Kuning', mode: 'Servo', verified: true },
+      { warna: 'Biru', mode: 'Servo', verified: true },
+      { warna: 'Merah', mode: 'Arm', verified: false, status: 'Berhasil (Belum Terverifikasi Fisik)' },
+      { status: 'FAILED' }
+    ];
+
+    const stats = aggregateSortingDistribution(rawCloudEntries);
+    assert.equal(stats.merah_arm, 1);
+    assert.equal(stats.kuning_arm, 1);
+    assert.equal(stats.biru_arm, 1);
+    assert.equal(stats.merah_servo, 1);
+    assert.equal(stats.kuning_servo, 1);
+    assert.equal(stats.biru_servo, 1);
+    assert.equal(stats.armTotal, 3);
+    assert.equal(stats.servoTotal, 3);
+    assert.equal(stats.merah, 2);
+    assert.equal(stats.kuning, 2);
+    assert.equal(stats.biru, 2);
+    assert.equal(stats.totalVerified, 6);
+    assert.equal(stats.total, 6);
+    assert.equal(stats.unverifiedTotal, 1);
+    assert.equal(stats.gagal, 1);
+    assert.equal(stats.totalAttempts, 8);
+    assert.equal(stats.successRate, 75.0);
   });
 
 });

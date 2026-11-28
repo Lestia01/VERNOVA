@@ -447,7 +447,18 @@ bool executeSorting(String color, String mode, String commandId, String transpor
   deviceState = "READY";
   digitalWrite(PIN_LED_STATUS, LOW);
 
-  // Format respons balik identik dengan protokol micro:bit MakeCode!
+  // Format respons balik identik dengan protokol micro:bit MakeCode & NUS UART!
+  if (isArmMode) {
+    sendTextLine("STATUS mode=arm motor=off message=sort_arm_" + color + "_done");
+    if (color == "biru") {
+      sendTextLine("STATUS mode=arm motor=on message=arm_object_biru_pass_through");
+    } else {
+      sendTextLine("STATUS mode=arm motor=off message=arm_object_" + color + "_detected_motor_stopped");
+    }
+  } else {
+    sendTextLine("STATUS mode=servo motor=on message=sort_servo_" + color + "_done");
+  }
+
   String colorUpper = color;
   colorUpper.toUpperCase();
   notifyBLE("DONE:" + colorUpper + "\n");
@@ -657,18 +668,22 @@ class CharCallbacks: public BLECharacteristicCallbacks {
       return;
     }
 
+    String rxNorm = rx;
+    rxNorm.toLowerCase();
+    rxNorm.replace("_", " ");
+
     // 1. Ekstrak Warna (merah, kuning, biru)
     String targetColor = "";
-    if (rx.indexOf("kuning") != -1) targetColor = "kuning";
-    else if (rx.indexOf("biru") != -1) targetColor = "biru";
-    else if (rx.indexOf("merah") != -1) targetColor = "merah";
+    if (rxNorm.indexOf("kuning") != -1) targetColor = "kuning";
+    else if (rxNorm.indexOf("biru") != -1) targetColor = "biru";
+    else if (rxNorm.indexOf("merah") != -1) targetColor = "merah";
 
     // 2. Ekstrak Mekanisme/Mode (servo atau arm)
     String targetMode = currentMode;
-    if (rx.indexOf("arm") != -1) {
+    if (rxNorm.indexOf("arm") != -1) {
       targetMode = "arm";
       currentMode = "arm";
-    } else if (rx.indexOf("servo") != -1) {
+    } else if (rxNorm.indexOf("servo") != -1) {
       targetMode = "servo";
       currentMode = "servo";
     }
@@ -676,13 +691,13 @@ class CharCallbacks: public BLECharacteristicCallbacks {
     // 3. Eksekusi Berdasarkan Perintah
     if (targetColor != "") {
       executeSorting(targetColor, targetMode, "CMD_BLE_" + String(millis()), "BLE UART");
-    } else if (rx == "arm" || rx == "mech:arm") {
+    } else if (rxNorm == "arm" || rxNorm == "mech arm" || rxNorm == "mech:arm") {
       executeModeCommand("arm");
-    } else if (rx == "servo" || rx == "mech:servo") {
+    } else if (rxNorm == "servo" || rxNorm == "mech servo" || rxNorm == "mech:servo") {
       executeModeCommand("servo");
-    } else if (rx == "stop") {
+    } else if (rxNorm == "stop") {
       executeEmergencyStop();
-    } else if (rx == "test") {
+    } else if (rxNorm == "test") {
       executeTestPulse();
     }
   }
