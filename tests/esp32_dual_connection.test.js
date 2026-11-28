@@ -432,8 +432,8 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     assert.equal(espBle.status, CONNECTION_STATES.DISCONNECTED);
   });
 
-  // 17. Parsing Status Selesai Sortir Format MakeCode ESP32 (STATUS mode=... message=...)
-  await t.test('17. Parsing status selesai sortir MakeCode (sort_servo_kuning_done & arm_object_kuning)', async () => {
+  // 17. Parsing Status Selesai Sortir Format MakeCode ESP32 (sort_servo_kuning_done & stage arm_object_kuning)
+  await t.test('17. Parsing status selesai sortir MakeCode (sort_servo_kuning_done & stage arm_object_kuning)', async () => {
     const espBle = new ESP32BLEAdapter({ simulationMode: true });
     const receivedEvents = [];
 
@@ -441,20 +441,21 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
       receivedEvents.push(ev);
     });
 
-    // Simulasi respons aktual dari sketch Arduino pengguna saat sortir kuning selesai
+    // Simulasi respons aktual dari sketch Arduino pengguna saat sortir servo kuning selesai
     espBle.receiveMockData('STATUS mode=servo motor=on message=sort_servo_kuning_done\n');
     const sortDoneEvent = receivedEvents.find(e => e.type === 'sort_completed' && e.color === 'kuning');
-    assert.ok(sortDoneEvent, 'Harus mendeteksi sort_completed untuk kuning');
+    assert.ok(sortDoneEvent, 'Harus mendeteksi sort_completed untuk kuning pada mode servo');
     assert.equal(sortDoneEvent.verified, true);
     assert.equal(espBle.getSensorState().mode, 'servo');
 
-    // Simulasi respons mode arm saat objek terdeteksi di sensor arm
+    // Simulasi respons mode arm saat objek terdeteksi di sensor arm (tahapan perantara motor stop, bukan bukti masuk bin)
     espBle.receiveMockData('STATUS mode=arm motor=off message=arm_object_kuning_detected_motor_stopped\n');
-    const armDoneEvent = receivedEvents.find(e => e.type === 'sort_completed' && e.stage.includes('detected_motor_stopped'));
-    assert.ok(armDoneEvent, 'Harus mendeteksi sort_completed saat sensor arm mendeteksi objek');
-    assert.equal(armDoneEvent.color, 'kuning');
-    assert.equal(armDoneEvent.verified, true);
+    const armStageEvent = receivedEvents.find(e => e.type === 'stage_update' && e.stage.includes('detected_motor_stopped'));
+    assert.ok(armStageEvent, 'Harus mendeteksi stage_update perantara saat sensor arm mendeteksi objek');
+    assert.equal(armStageEvent.color, 'kuning');
+    assert.equal(armStageEvent.verified, false);
     assert.equal(espBle.getSensorState().mode, 'arm');
+    assert.equal(espBle.getSensorState().sensors.arm, true);
   });
 
   // 18. Verifikasi sendSortingCommand dengan Konfirmasi Sensor/Done
@@ -500,8 +501,8 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     assert.equal(res.mode, 'Servo');
   });
 
-  // 20. Verifikasi Perintah Mode Arm (merah_arm, kuning_arm, biru_arm) & Konfirmasi Sensor ARM
-  await t.test('20. Mode Arm (merah_arm, kuning_arm, biru_arm) terurai & terverifikasi fisik', async () => {
+  // 20. Verifikasi Perintah Mode Arm (merah_arm, kuning_arm, biru_arm) & Konfirmasi Sensor Bin Warna
+  await t.test('20. Mode Arm (merah_arm, kuning_arm, biru_arm) terurai & terverifikasi via sensor bin (merah, kuning, biru)', async () => {
     const manager = new DeviceConnectionManager({ simulationMode: false, deviceType: 'ESP32_BLE' });
     const espBle = manager.getActiveAdapter();
     const sentCommands = [];
@@ -510,9 +511,12 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
       return true;
     };
 
-    // A. Uji merah_arm didekomposisi menjadi color=merah & mode=Arm
+    // A. Uji merah_arm didekomposisi menjadi color=merah & mode=Arm, terverifikasi saat objek masuk ke bin merah (SENSOR:merah)
     setTimeout(() => {
-      espBle.receiveMockData('STATUS mode=arm motor=off message=arm_object_merah_detected_motor_stopped\n');
+      espBle.receiveMockData('ARM:SENSE:merah'); // Tahapan perantara di lengan robot
+      setTimeout(() => {
+        espBle.receiveMockData('SENSOR:merah'); // Masuk ke bin merah -> terverifikasi
+      }, 30);
     }, 50);
     const resMerahArm = await manager.dispatchSortingCommand({ color: 'merah_arm', force: true });
     assert.equal(sentCommands[0], 'merah arm');
@@ -522,9 +526,9 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     assert.equal(resMerahArm.color, 'merah');
     assert.equal(resMerahArm.mode, 'Arm');
 
-    // B. Uji kuning_arm terverifikasi via deteksi sensor fisik ARM
+    // B. Uji kuning_arm terverifikasi via deteksi sensor fisik bin kuning (SENSOR:kuning)
     setTimeout(() => {
-      espBle.receiveMockData('{"type":"sensor_update","sensor":"arm","detected":true,"value":180}\n');
+      espBle.receiveMockData('SENSOR:kuning');
     }, 50);
     const resKuningArm = await manager.dispatchSortingCommand({ color: 'kuning_arm', force: true });
     assert.equal(sentCommands[1], 'kuning arm');
@@ -532,9 +536,9 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     assert.equal(resKuningArm.verified, true);
     assert.equal(resKuningArm.mode, 'Arm');
 
-    // C. Uji biru_arm terverifikasi via sinyal arm_object_biru_pass_through
+    // C. Uji biru_arm terverifikasi via deteksi sensor fisik bin biru (SENSOR:biru)
     setTimeout(() => {
-      espBle.receiveMockData('STATUS mode=arm motor=on message=arm_object_biru_pass_through\n');
+      espBle.receiveMockData('SENSOR:biru');
     }, 50);
     const resBiruArm = await manager.dispatchSortingCommand({ color: 'biru_arm', force: true });
     assert.equal(sentCommands[2], 'biru arm');
@@ -623,21 +627,20 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     const waitEv = notifications.find(n => n.type === 'stage_update' && n.stage === 'arm_waiting_for_sensor_merah');
     assert.ok(waitEv, 'Harus memicu stage_update arm_waiting_for_sensor_merah');
 
-    // B. ARM:SENSE:merah
+    // B. ARM:SENSE:merah adalah tahapan perantara (pick point), verified tetap false
     espBle.receiveMockData('ARM:SENSE:merah');
     assert.equal(espBle.sensorState.sensors.arm, true);
     assert.equal(espBle.sensorState.objectPresent, true);
-    const senseEv = notifications.find(n => n.type === 'sort_completed' && n.sensor === 'arm' && n.color === 'merah');
-    assert.ok(senseEv, 'Harus memicu sort_completed untuk ARM:SENSE:merah');
-    assert.equal(senseEv.verified, true);
+    const senseEv = notifications.find(n => n.type === 'stage_update' && n.stage === 'arm_sense_merah');
+    assert.ok(senseEv, 'Harus memicu stage_update untuk ARM:SENSE:merah');
+    assert.equal(senseEv.verified, false);
 
-    // C. arm_sensor_detected_motor_stopped
+    // C. arm_sensor_detected_motor_stopped adalah tahapan motor berhenti saat pick point, bukan penyortiran selesai
     espBle.receiveMockData('STATUS mode=arm motor=off message=arm_sensor_detected_motor_stopped\n');
     const motorStopEv = notifications.find(n => n.stage === 'arm_sensor_detected_motor_stopped');
     assert.ok(motorStopEv, 'Harus memicu status arm_sensor_detected_motor_stopped');
-    assert.equal(motorStopEv.type, 'sort_completed');
-    assert.equal(motorStopEv.verified, true);
-    assert.equal(motorStopEv.color, 'merah');
+    assert.equal(motorStopEv.type, 'stage_update');
+    assert.equal(motorStopEv.verified, false);
 
     // D. DONE:servo:kuning
     espBle.receiveMockData('DONE:servo:kuning');
@@ -645,9 +648,12 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     assert.ok(doneEv, 'Harus mengenali DONE:servo:kuning');
     assert.equal(doneEv.verified, true);
 
-    // E. Selesaikan transaksi sortir merah arm via dispatchSortingCommand
+    // E. Pada mode arm, transaksi HANYA terverifikasi jika sensor bin warna (SENSOR:merah) aktif
     setTimeout(() => {
-      espBle.receiveMockData('ARM:SENSE:merah');
+      espBle.receiveMockData('ARM:SENSE:merah'); // Sensor arm aktif (belum terverifikasi)
+      setTimeout(() => {
+        espBle.receiveMockData('SENSOR:merah'); // Objek tiba di sensor bin merah -> TERVERIFIKASI
+      }, 30);
     }, 50);
     const res = await manager.dispatchSortingCommand({ color: 'merah', mode: 'Arm', force: true });
     assert.equal(res.ok, true);

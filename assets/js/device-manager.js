@@ -1299,13 +1299,14 @@
         this.sensorState.state = 'OBJECT_PRESENT';
         this.sensorState.lastUpdate = new Date().toISOString();
 
-        this._notify(this.status, `[ESP32 BLE Arm] Objek ${col.toUpperCase()} terdeteksi di sensor ARM`, {
-          type: 'sort_completed',
+        // Sensor Arm adalah tahapan perantara (pick point), BUKAN bukti selesai masuk ke wadah/bin
+        this._notify(this.status, `[ESP32 BLE Arm] Objek ${col.toUpperCase()} terdeteksi di sensor ARM (menuju bin)`, {
+          type: 'stage_update',
           stage: `arm_sense_${col}`,
           sensor: 'arm',
           color: col,
           detected: true,
-          verified: true,
+          verified: false,
           mode: 'arm',
           rawText: line
         });
@@ -1443,7 +1444,9 @@
         }
 
         // Deteksi apakah pesan status ini mengindikasikan penyortiran selesai
-        const isSortCompleted = stage.includes('_done') || stage.includes('pass_through') || stage.includes('detected_motor_stopped') || stage.includes('SERVO_DONE') || stage.includes('ARM_DONE') || stage.includes('DONE');
+        // PENTING: Sinyal arm_sensor_* dan arm_waiting_* adalah tahapan perantara robot arm, BUKAN bukti selesai masuk ke wadah/bin
+        const isArmIntermediate = stage.includes('arm_sensor_') || stage.includes('arm_waiting') || stage.includes('arm_object_');
+        const isSortCompleted = !isArmIntermediate && (stage.includes('_done') || stage.includes('SERVO_DONE') || stage.includes('ARM_DONE'));
         let finishedColor = null;
         if (stage.includes('kuning')) finishedColor = 'kuning';
         else if (stage.includes('biru')) finishedColor = 'biru';
@@ -1455,7 +1458,7 @@
         if (modeParam) this.sensorState.mode = modeParam.toLowerCase();
 
         // Update status fisik sensor arm dari pesan motor/sensor
-        if (stage.includes('arm_sensor_detected') || stage.includes('arm_sensor_biru_pass_through')) {
+        if (stage.includes('detected_motor_stopped') || stage.includes('arm_sensor_detected') || stage.includes('arm_sensor_biru_pass_through') || stage.includes('arm_sense')) {
           this.sensorState.sensors.arm = true;
           this.sensorState.channels.ARM = 'OBJECT_PRESENT';
           this.sensorState.objectPresent = true;
@@ -1647,31 +1650,28 @@
         // Pasang listener verifikasi sebelum mengirim perintah
         const unsubscribe = this.addListener((ev) => {
           if (!ev) return;
-          // 1. Konfirmasi dari telemetri sensor fisik
+          // 1. Konfirmasi dari telemetri sensor fisik bin warna (merah, kuning, biru)
+          // PENTING: Baik mode servo maupun mode arm, bukti fisik objek telah tersortir HANYA berasal dari sensor warna di bin (merah, kuning, biru), BUKAN sensor arm!
           if (ev.type === 'sensor_telemetry') {
-            if ((ev.sensor === color || ev.channel === color.toUpperCase() || ev.sensorState?.sensors?.[color]) && ev.detected) {
+            if ((ev.sensor === color || ev.channel === color.toUpperCase() || ev.sensorState?.sensors?.[color]) && ev.detected && ['merah', 'kuning', 'biru'].includes(color)) {
               isPhysicallyVerified = true;
-              completionDetail = `Sensor ${color.toUpperCase()} terdeteksi`;
-            }
-            // Dalam mode Arm, deteksi sensor ARM GPIO 34 adalah bukti fisik objek mencapai lengan robot
-            if (modeStr === 'arm' && (ev.sensor === 'arm' || ev.channel === 'ARM' || ev.sensorState?.sensors?.arm) && ev.detected) {
-              isPhysicallyVerified = true;
-              completionDetail = 'Sensor ARM terdeteksi';
+              completionDetail = `Sensor bin ${color.toUpperCase()} terdeteksi`;
             }
           }
-          // 2. Konfirmasi status selesai sortir dari firmware (sort_servo_kuning_done, sort_servo_merah_done, sort_arm_..., arm_object_..., DONE:, ARM:SENSE:, dsb.)
-          if (ev.type === 'sort_completed') {
-            if (!ev.color || ev.color === color) {
+          // 2. Konfirmasi mode servo (flap) jika sinyal selesai aktuator diterima
+          if (modeStr !== 'arm') {
+            if (ev.type === 'sort_completed') {
+              if (!ev.color || ev.color === color) {
+                isPhysicallyVerified = true;
+                completionDetail = ev.stage || 'Sortir servo selesai';
+              }
+            } else if (ev.stage && (
+              (ev.stage.includes(color) && (ev.stage.includes('sort_servo_') || ev.stage.includes('done'))) ||
+              ev.stage.includes('SERVO_DONE')
+            )) {
               isPhysicallyVerified = true;
-              completionDetail = ev.stage || 'Sortir selesai';
+              completionDetail = ev.stage || 'Sortir servo selesai';
             }
-          } else if (ev.stage && (
-            (ev.stage.includes(color) && (ev.stage.includes('done') || ev.stage.includes('stopped') || ev.stage.includes('pass_through') || ev.stage.includes('detected') || ev.stage.includes('sense'))) ||
-            (modeStr === 'arm' && (ev.stage.includes('arm_sensor_detected') || ev.stage.includes('arm_sensor_cleared') || ev.stage.includes('arm_sense'))) ||
-            ev.stage.includes('SERVO_DONE') || ev.stage.includes('ARM_DONE') || ev.stage.includes('READY') || ev.stage.includes('DONE')
-          )) {
-            isPhysicallyVerified = true;
-            completionDetail = ev.stage || 'Sortir selesai';
           }
         });
 

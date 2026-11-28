@@ -2362,69 +2362,88 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       updateDeviceUI(ev);
 
       // Upgrade status transaksi terakhir ke TERVERIFIKASI FISIK jika sinyal sensor / status selesai diterima
-      if (ev && (ev.type === 'sort_completed' || (ev.type === 'sensor_telemetry' && ev.detected))) {
+      if (ev) {
         const confirmedColor = (ev.color || (ev.sensor !== 'all' ? ev.sensor : null) || '').toLowerCase();
-        if (state.excelLogs && state.excelLogs.length > 0) {
-          const lastLog = state.excelLogs[state.excelLogs.length - 1];
-          if (lastLog && !lastLog.verified) {
-            const isArmSensorDetection = (ev.sensor === 'arm' || ev.channel === 'ARM' || (ev.stage && ev.stage.includes('arm_sense'))) && (ev.detected !== false);
-            const matchesColor = confirmedColor && lastLog.warna && lastLog.warna.toLowerCase() === confirmedColor;
-            const matchesArm = isArmSensorDetection && String(lastLog.mode || '').toLowerCase().includes('arm');
-            const isSortCompletedForLog = ev.type === 'sort_completed' && (!ev.color || ev.color === lastLog.warna.toLowerCase());
+        const isArmSensorDetection = (ev.sensor === 'arm' || ev.channel === 'ARM' || (ev.stage && ev.stage.includes('arm_sense'))) && (ev.detected !== false);
 
-            if (matchesColor || matchesArm || isSortCompletedForLog) {
-              lastLog.verified = true;
-              lastLog.sensorVerified = true;
-              lastLog.status = 'Berhasil (Terverifikasi)';
-              lastLog.statusCategory = 'verified';
-              lastLog.nilai = 1;
+        // Jika sensor arm terdeteksi, perbarui pill status proses (tahapan perantara), BUKAN verifikasi selesai
+        if (isArmSensorDetection) {
+          const manVerif = $('man-verif-pill');
+          if (manVerif && state.excelLogs && state.excelLogs.length > 0) {
+            const lastLog = state.excelLogs[state.excelLogs.length - 1];
+            if (lastLog && !lastLog.verified && String(lastLog.mode || '').toLowerCase().includes('arm')) {
+              manVerif.innerText = `PROSES: OBJEK DI LENGAN ROBOT (MENUNGGU SENSOR BIN ${lastLog.warna.toUpperCase()})`;
+              manVerif.className = 'pill yellow font-bold';
+            }
+          }
+        }
 
-              if (state.sortingData.unverifiedTotal > 0) state.sortingData.unverifiedTotal--;
-              state.sortingData.totalVerified++;
-              state.sortingData.total++;
-              const colorKey = lastLog.warna.toLowerCase();
-              const targetMech = (String(lastLog.mode || '').toLowerCase().includes('arm')) ? 'arm' : 'servo';
-              const classKey = `${colorKey}_${targetMech}`;
-              if (typeof state.sortingData[classKey] === 'number') state.sortingData[classKey]++;
-              if (typeof state.sortingData[colorKey] === 'number') state.sortingData[colorKey]++;
-              if (targetMech === 'arm') state.sortingData.armTotal++; else state.sortingData.servoTotal++;
+        // Verifikasi fisik dan penambahan nilai transaksi
+        if (ev.type === 'sort_completed' || (ev.type === 'sensor_telemetry' && ev.detected)) {
+          if (state.excelLogs && state.excelLogs.length > 0) {
+            const lastLog = state.excelLogs[state.excelLogs.length - 1];
+            if (lastLog && !lastLog.verified) {
+              const isArmMode = String(lastLog.mode || '').toLowerCase().includes('arm');
+              const matchesColor = ['merah', 'kuning', 'biru'].includes(confirmedColor) && lastLog.warna && lastLog.warna.toLowerCase() === confirmedColor;
+              const isSortCompletedForServo = !isArmMode && ev.type === 'sort_completed' && (!ev.color || ev.color === lastLog.warna.toLowerCase());
 
-              const attempts = (state.sortingData.totalVerified || state.sortingData.total) + (state.sortingData.unverifiedTotal || 0) + (state.sortingData.gagal || 0);
-              state.sortingData.totalAttempts = attempts;
-              state.sortingData.verifiedSuccessRate = attempts > 0 ? Number((((state.sortingData.totalVerified || state.sortingData.total) / attempts) * 100).toFixed(1)) : 0.0;
-              state.sortingData.successRateString = `${state.sortingData.verifiedSuccessRate.toFixed(1)}%`;
+              // Syarat verifikasi:
+              // - Mode ARM: HARUS sensor warna (merah, kuning, biru) di bin yang mendeteksi objek, BUKAN sensor arm!
+              // - Mode SERVO: Sensor warna di bin ATAU status selesai flap servo
+              if (matchesColor || isSortCompletedForServo) {
+                lastLog.verified = true;
+                lastLog.sensorVerified = true;
+                lastLog.status = 'Berhasil (Terverifikasi)';
+                lastLog.statusCategory = 'verified';
+                lastLog.nilai = 1;
 
-              // Update feed item pertama jika sesuai warna
-              if (state.feeds && state.feeds.length > 0) {
-                const f = state.feeds[0];
-                if (f.title && f.title.toLowerCase().includes(colorKey)) {
-                  f.title = `${lastLog.warna} Tersortir (TERVERIFIKASI)`;
-                  f.icon = 'fas fa-circle-check';
+                if (state.sortingData.unverifiedTotal > 0) state.sortingData.unverifiedTotal--;
+                state.sortingData.totalVerified++;
+                state.sortingData.total++;
+                const colorKey = lastLog.warna.toLowerCase();
+                const targetMech = (String(lastLog.mode || '').toLowerCase().includes('arm')) ? 'arm' : 'servo';
+                const classKey = `${colorKey}_${targetMech}`;
+                if (typeof state.sortingData[classKey] === 'number') state.sortingData[classKey]++;
+                if (typeof state.sortingData[colorKey] === 'number') state.sortingData[colorKey]++;
+                if (targetMech === 'arm') state.sortingData.armTotal++; else state.sortingData.servoTotal++;
+
+                const attempts = (state.sortingData.totalVerified || state.sortingData.total) + (state.sortingData.unverifiedTotal || 0) + (state.sortingData.gagal || 0);
+                state.sortingData.totalAttempts = attempts;
+                state.sortingData.verifiedSuccessRate = attempts > 0 ? Number((((state.sortingData.totalVerified || state.sortingData.total) / attempts) * 100).toFixed(1)) : 0.0;
+                state.sortingData.successRateString = `${state.sortingData.verifiedSuccessRate.toFixed(1)}%`;
+
+                // Update feed item pertama jika sesuai warna
+                if (state.feeds && state.feeds.length > 0) {
+                  const f = state.feeds[0];
+                  if (f.title && f.title.toLowerCase().includes(colorKey)) {
+                    f.title = `${lastLog.warna} Tersortir (TERVERIFIKASI)`;
+                    f.icon = 'fas fa-circle-check';
+                  }
                 }
-              }
 
-              if (typeof updateUIStats === 'function') updateUIStats();
-              if (typeof updateChart === 'function') updateChart();
-              if (typeof renderFeed === 'function') renderFeed();
+                if (typeof updateUIStats === 'function') updateUIStats();
+                if (typeof updateChart === 'function') updateChart();
+                if (typeof renderFeed === 'function') renderFeed();
 
-              // Sinkronisasi pembaruan retroaktif ke Firebase Realtime Database
-              if (lastLog.firebaseKey && state.db) {
-                try {
-                  const fbCat = lastLog.firebaseCategory || colorKey;
-                  update(ref(state.db, `${state.currentPath}/${fbCat}/${lastLog.firebaseKey}`), {
-                    verified: true,
-                    verificationStatus: 'verified',
-                    statusCategory: 'verified',
-                    status: 'Berhasil (Terverifikasi)',
-                    value: 1
-                  }).catch(e => console.warn('Firebase retroactive sync error:', e));
-                } catch (err) {}
-              }
+                // Sinkronisasi pembaruan retroaktif ke Firebase Realtime Database
+                if (lastLog.firebaseKey && state.db) {
+                  try {
+                    const fbCat = lastLog.firebaseCategory || colorKey;
+                    update(ref(state.db, `${state.currentPath}/${fbCat}/${lastLog.firebaseKey}`), {
+                      verified: true,
+                      verificationStatus: 'verified',
+                      statusCategory: 'verified',
+                      status: 'Berhasil (Terverifikasi)',
+                      value: 1
+                    }).catch(e => console.warn('Firebase retroactive sync error:', e));
+                  } catch (err) {}
+                }
 
-              const manVerif = $('man-verif-pill');
-              if (manVerif) {
-                manVerif.innerText = `VERIFIKASI: VALID SENSOR (${lastLog.warna.toUpperCase()} - ${targetMech.toUpperCase()})`;
-                manVerif.className = 'pill green font-bold';
+                const manVerif = $('man-verif-pill');
+                if (manVerif) {
+                  manVerif.innerText = `VERIFIKASI: VALID SENSOR BIN (${lastLog.warna.toUpperCase()} - ${targetMech.toUpperCase()})`;
+                  manVerif.className = 'pill green font-bold';
+                }
               }
             }
           }
@@ -2635,10 +2654,13 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         manVerif.innerText = 'VERIFIKASI: MENUNGGU DATA SENSOR ESP32';
         manVerif.className = 'pill gray font-bold';
       } else if (ss && ss.sensors) {
-        const activeSensors = Object.entries(ss.sensors).filter(([_, v]) => v).map(([k]) => k.toUpperCase());
-        if (activeSensors.length > 0) {
-          manVerif.innerText = `VERIFIKASI: OBJEK FISIK TERDETEKSI (${activeSensors.join(', ')})`;
+        const binSensors = ['merah', 'kuning', 'biru'].filter(k => ss.sensors[k]).map(k => k.toUpperCase());
+        if (binSensors.length > 0) {
+          manVerif.innerText = `VERIFIKASI: SENSOR BIN AKTIF (${binSensors.join(', ')})`;
           manVerif.className = 'pill green font-bold';
+        } else if (ss.sensors.arm) {
+          manVerif.innerText = 'PROSES: SENSOR ARM TERDETEKSI (BELUM KE BIN)';
+          manVerif.className = 'pill yellow font-bold';
         } else {
           manVerif.innerText = 'VERIFIKASI: SENSOR KOSONG (STANDBY)';
           manVerif.className = 'pill blue font-bold';
