@@ -877,12 +877,15 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
               </div>
 
               <!-- Selector Mekanisme Default / Aktif -->
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2" id="mech-selector-group">
                 <label class="text-[10px] font-black uppercase tracking-[.12em] t-muted whitespace-nowrap">Mekanisme:</label>
-                <select id="mode-selector" onchange="window.changeSortingMode(this.value)" class="inp !py-1.5 !px-2.5 text-xs font-bold cursor-pointer">
-                  <option value="Servo">🤖 Servo Flap</option>
-                  <option value="Arm">🦾 Lengan Robot (Arm)</option>
+                <select id="mode-selector" onchange="window.changeSortingMode(this.value)" class="inp !py-1.5 !px-2.5 text-xs font-bold cursor-pointer hidden">
+                  <option value="Servo">Servo Flap</option>
+                  <option value="Arm">Lengan Robot (Arm)</option>
                 </select>
+                <span id="mech-auto-hint" class="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-500/20 flex items-center gap-1.5">
+                  <i class="fas fa-magic text-[9px]"></i><span>Otomatis (Sesuai Deteksi AI: merah_servo &rarr; Servo, kuning_arm &rarr; Arm)</span>
+                </span>
               </div>
             </div>
 
@@ -2972,6 +2975,15 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
         manPanel.classList.toggle('hidden', isAuto);
       }
 
+      const modeSel = $('mode-selector');
+      const mechHint = $('mech-auto-hint');
+      if (modeSel) {
+        modeSel.classList.toggle('hidden', isAuto);
+      }
+      if (mechHint) {
+        mechHint.classList.toggle('hidden', !isAuto);
+      }
+
       showToast(isAuto ? "Mode AUTO aktif (Keputusan mekanisme dari AI Vision)" : "Mode MANUAL aktif (Kontrol fisik via stasiun operator)");
       logActivity(isAuto ? "fas fa-bolt" : "fas fa-gamepad", isAuto ? "background:rgba(16,185,129,.15);color:#10b981" : "background:rgba(245,158,11,.15);color:#f59e0b", "Operating Mode Changed", `Mode diubah ke ${targetMode}`);
     } catch (e) {
@@ -3340,12 +3352,35 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             ld.innerHTML = `<span style="color:var(--brand)">${topDet.class_name}</span><span class="t-muted"> · ${(topDet.confidence * 100).toFixed(1)}% · ${time} (YOLO)</span>`;
           }
 
+          const opMode = (window.deviceManager && typeof window.deviceManager.getOperatingMode === 'function')
+            ? window.deviceManager.getOperatingMode()
+            : ((window.deviceManager && window.deviceManager.operatingMode) || 'AUTO');
+
+          if (opMode === 'MANUAL') {
+            const manColor = $('man-color-select');
+            if (manColor && manColor.value !== topDet.color) {
+              manColor.value = topDet.color;
+            }
+            return;
+          }
+
           if (!state.isCoolingDown && !state.pendingDetection) {
             state.isCoolingDown = true;
             state.pendingDetection = topDet.color;
             state.pendingStartTime = Date.now();
-            const detectedMech = topDet.mechanism ? (topDet.mechanism === 'arm' ? 'Arm' : 'Servo') : (String(topDet.class_name || '').toLowerCase().includes('arm') ? 'Arm' : $('mode-selector').value);
+            const cLower = String(topDet.class_name || '').toLowerCase();
+            let detectedMech = 'Servo';
+            if (cLower.includes('arm') || cLower.includes('lengan') || topDet.mechanism === 'arm') {
+              detectedMech = 'Arm';
+            } else if (cLower.includes('servo') || cLower.includes('flap') || topDet.mechanism === 'servo') {
+              detectedMech = 'Servo';
+            } else {
+              // Aturan sortir: merah -> Servo, kuning -> Arm, biru -> Arm
+              detectedMech = (topDet.color === 'merah') ? 'Servo' : 'Arm';
+            }
             state.pendingMode = detectedMech;
+            const modeSel = $('mode-selector');
+            if (modeSel) modeSel.value = detectedMech;
 
             state.timeoutTimer = setTimeout(() => { executeTimeout(topDet.color); }, 12000);
 
@@ -3417,13 +3452,35 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       else if (cLower.includes('merah') || cLower.includes('red')) colorCode = 'merah';
 
       if (colorCode) {
+        const opMode = (window.deviceManager && typeof window.deviceManager.getOperatingMode === 'function')
+          ? window.deviceManager.getOperatingMode()
+          : ((window.deviceManager && window.deviceManager.operatingMode) || 'AUTO');
+
+        if (opMode === 'MANUAL') {
+          const manColor = $('man-color-select');
+          if (manColor && manColor.value !== colorCode) {
+            manColor.value = colorCode;
+          }
+          return;
+        }
+
         state.isCoolingDown = true;
         state.pendingDetection = colorCode;
         state.pendingStartTime = Date.now();
-        let detectedMech = $('mode-selector').value;
-        if (cLower.includes('arm')) detectedMech = 'Arm';
-        else if (cLower.includes('servo')) detectedMech = 'Servo';
+
+        // Mode AUTO: Mekanisme ditentukan murni dari label deteksi AI (merah_servo -> Servo, kuning_arm -> Arm, dsb.)
+        let detectedMech = 'Servo';
+        if (cLower.includes('arm') || cLower.includes('lengan')) {
+          detectedMech = 'Arm';
+        } else if (cLower.includes('servo') || cLower.includes('flap')) {
+          detectedMech = 'Servo';
+        } else {
+          // Aturan sortir jika label hanya warna polos: merah -> Servo, kuning -> Arm, biru -> Arm
+          detectedMech = (colorCode === 'merah') ? 'Servo' : 'Arm';
+        }
         state.pendingMode = detectedMech;
+        const modeSel = $('mode-selector');
+        if (modeSel) modeSel.value = detectedMech;
 
         // Watchdog timeout 12s
         state.timeoutTimer = setTimeout(() => { executeTimeout(colorCode); }, 12000);
