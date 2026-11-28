@@ -353,4 +353,126 @@ test('VERNOVA — ESP32 Dual Connection & Multi-Device Verification', async (t) 
     assert.equal(receivedEvents[1].stage, 'OBJECT_DETECTED');
   });
 
+  // 13. Fallback Parsing Token Warna Sederhana (merah, kuning, biru, arm, kosong)
+  await t.test('13. Parsing token warna sederhana (merah, kuning, biru, arm, kosong) tanpa crash', async () => {
+    const espBle = new ESP32BLEAdapter({ simulationMode: true });
+    const receivedEvents = [];
+
+    espBle.onStatusChange((ev) => {
+      receivedEvents.push(ev);
+    });
+
+    // Simulasi firmware mengirim "merah\n"
+    espBle.receiveMockData('merah\n');
+    assert.equal(espBle.getSensorState().sensors.merah, true);
+    assert.equal(espBle.getSensorState().objectPresent, true);
+    assert.equal(receivedEvents.some(e => e.type === 'sensor_telemetry' && e.sensor === 'merah'), true);
+
+    // Simulasi firmware mengirim "kuning\n"
+    espBle.receiveMockData('kuning\n');
+    assert.equal(espBle.getSensorState().sensors.kuning, true);
+    assert.equal(espBle.getSensorState().sensors.merah, false); // Sensor warna berganti
+    assert.equal(espBle.getSensorState().objectPresent, true);
+
+    // Simulasi firmware mengirim "kosong\n"
+    espBle.receiveMockData('kosong\n');
+    assert.equal(espBle.getSensorState().objectPresent, false);
+    assert.equal(espBle.getSensorState().sensors.kuning, false);
+    assert.equal(espBle.getSensorState().state, 'OBJECT_ABSENT');
+    assert.equal(receivedEvents.some(e => e.type === 'sensor_telemetry' && e.sensor === 'all' && e.detected === false), true);
+  });
+
+  // 14. Penanganan Buffer Tanpa Newline (Auto-Flush Timer)
+  await t.test('14. Penanganan data tanpa newline diproses via auto-flush buffer', async () => {
+    const espBle = new ESP32BLEAdapter({ simulationMode: true });
+    const receivedEvents = [];
+
+    espBle.onStatusChange((ev) => {
+      receivedEvents.push(ev);
+    });
+
+    // Kirim data JSON tanpa \n (simulasi firmware yang tidak membubuhkan newline)
+    espBle.receiveMockData('{"type":"sensor_update","sensor":"biru","detected":true,"value":0}');
+    
+    // Karena merupakan JSON lengkap, auto-flush langsung mengeksekusinya
+    assert.equal(espBle.getSensorState().sensors.biru, true);
+    assert.equal(espBle.getSensorState().objectPresent, true);
+    assert.equal(receivedEvents.length, 1);
+  });
+
+  // 15. Penanganan Payload Tidak Valid / Corrupt JSON Tanpa Crash
+  await t.test('15. Payload JSON rusak/corrupt tidak menyebabkan crash sistem', async () => {
+    const espBle = new ESP32BLEAdapter({ simulationMode: true });
+    const receivedEvents = [];
+
+    espBle.onStatusChange((ev) => {
+      receivedEvents.push(ev);
+    });
+
+    // Kirim JSON corrupt / terpotong rusak
+    espBle.receiveMockData('{type:invalid_json_corrupted\n');
+    // Sistem tetap hidup, menerima pesan sebagai rawText tanpa melempar unhandled error
+    assert.equal(receivedEvents.length, 1);
+    assert.ok(receivedEvents[0].rawText.includes('invalid_json_corrupted'));
+
+    // Kirim JSON normal setelahnya untuk memastikan parser tetap berfungsi normal
+    espBle.receiveMockData('{"type":"sensor_update","sensor":"merah","detected":true,"value":0}\n');
+    assert.equal(espBle.getSensorState().sensors.merah, true);
+  });
+
+  // 16. Verifikasi Disconnect dan Pembersihan Listener/Buffer
+  await t.test('16. Disconnect membersihkan buffer dan state secara tertib', async () => {
+    const espBle = new ESP32BLEAdapter({ simulationMode: true });
+    espBle._rxBuffer = 'sisa_data_tidak_selesai';
+    
+    await espBle.disconnect();
+    assert.equal(espBle._rxBuffer, '');
+    assert.equal(espBle.hasReceivedPhysicalData, false);
+    assert.equal(espBle.status, CONNECTION_STATES.DISCONNECTED);
+  });
+
+  // 17. Parsing Status Selesai Sortir Format MakeCode ESP32 (STATUS mode=... message=...)
+  await t.test('17. Parsing status selesai sortir MakeCode (sort_servo_kuning_done & arm_object_kuning)', async () => {
+    const espBle = new ESP32BLEAdapter({ simulationMode: true });
+    const receivedEvents = [];
+
+    espBle.onStatusChange((ev) => {
+      receivedEvents.push(ev);
+    });
+
+    // Simulasi respons aktual dari sketch Arduino pengguna saat sortir kuning selesai
+    espBle.receiveMockData('STATUS mode=servo motor=on message=sort_servo_kuning_done\n');
+    const sortDoneEvent = receivedEvents.find(e => e.type === 'sort_completed' && e.color === 'kuning');
+    assert.ok(sortDoneEvent, 'Harus mendeteksi sort_completed untuk kuning');
+    assert.equal(sortDoneEvent.verified, true);
+    assert.equal(espBle.getSensorState().mode, 'servo');
+
+    // Simulasi respons mode arm saat objek terdeteksi di sensor arm
+    espBle.receiveMockData('STATUS mode=arm motor=off message=arm_object_kuning_detected_motor_stopped\n');
+    const armDoneEvent = receivedEvents.find(e => e.type === 'sort_completed' && e.stage.includes('detected_motor_stopped'));
+    assert.ok(armDoneEvent, 'Harus mendeteksi sort_completed saat sensor arm mendeteksi objek');
+    assert.equal(armDoneEvent.color, 'kuning');
+    assert.equal(armDoneEvent.verified, true);
+    assert.equal(espBle.getSensorState().mode, 'arm');
+  });
+
+  // 18. Verifikasi sendSortingCommand dengan Konfirmasi Sensor/Done
+  await t.test('18. sendSortingCommand terverifikasi fisik saat sensor atau status selesai diterima', async () => {
+    const espBle = new ESP32BLEAdapter({ simulationMode: false });
+    // Mock write BLE
+    espBle._writeBLECommand = async () => true;
+
+    // Simulasikan kedatangan pesan status selesai dari Arduino setelah 50ms
+    setTimeout(() => {
+      espBle.receiveMockData('STATUS mode=servo motor=on message=sort_servo_kuning_done\n');
+    }, 50);
+
+    const res = await espBle.sendSortingCommand({ color: 'kuning', mode: 'Servo' });
+    assert.equal(res.ok, true);
+    assert.equal(res.verified, true);
+    assert.equal(res.sensorVerified, true);
+    assert.equal(res.statusCategory, 'verified');
+    assert.equal(res.color, 'kuning');
+  });
+
 });

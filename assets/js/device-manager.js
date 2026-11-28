@@ -69,10 +69,10 @@
   const VALID_COLORS = ['kuning', 'biru', 'merah'];
   const VALID_MODES = ['Servo', 'Arm'];
 
-  // UUID Standar Nordic Semiconductor UART Service (BBC micro:bit MakeCode BLE)
+  // UUID Standar Nordic Semiconductor UART Service (NUS)
   const NORDIC_UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-  const NORDIC_UART_TX_CHARACTERISTIC_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // micro:bit -> Web (Notify)
-  const NORDIC_UART_RX_CHARACTERISTIC_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Web -> micro:bit (Write)
+  const NORDIC_UART_RX_CHARACTERISTIC_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // Web -> Device (Write)
+  const NORDIC_UART_TX_CHARACTERISTIC_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Device -> Web (Notify)
 
   function isWebBluetoothSupported() {
     return typeof navigator !== 'undefined' && Boolean(navigator.bluetooth);
@@ -849,6 +849,7 @@
       this.lastError = null;
       this.lastAck = null;
       this.lastTelemetry = null;
+      this.hasReceivedPhysicalData = false;
       this.sensorState = {
         state: 'OBJECT_ABSENT',
         objectPresent: false,
@@ -859,6 +860,8 @@
         rawValues: { merah: null, biru: null, kuning: null, arm: null }
       };
       this._rxBuffer = '';
+      this._rxFlushTimer = null;
+      this._boundNotificationHandler = null;
       this._listeners = new Set();
 
       if (this.simulationMode) {
@@ -912,7 +915,8 @@
         simulationMode: this.simulationMode,
         lastError: this.lastError,
         telemetry: this.lastTelemetry,
-        sensorState: this.sensorState
+        sensorState: this.sensorState,
+        hasReceivedPhysicalData: this.hasReceivedPhysicalData
       };
     }
 
@@ -980,26 +984,51 @@
 
         const service = await this.server.getPrimaryService(NORDIC_UART_SERVICE_UUID);
 
-        // Ambil characteristics RX (write) dan TX (notify)
+        // Ambil characteristics RX (write) dan TX (notify) dengan pencocokan UUID eksplisit & fallback properti
         const chars = await service.getCharacteristics();
-        this.rxCharacteristic = chars.find(c => c.properties.write || c.properties.writeWithoutResponse);
-        this.txCharacteristic = chars.find(c => c.properties.notify || c.properties.indicate);
+        this.rxCharacteristic = chars.find(c => c.uuid.toLowerCase() === NORDIC_UART_RX_CHARACTERISTIC_UUID) ||
+                               chars.find(c => c.properties.write || c.properties.writeWithoutResponse);
+        this.txCharacteristic = chars.find(c => c.uuid.toLowerCase() === NORDIC_UART_TX_CHARACTERISTIC_UUID) ||
+                               chars.find(c => c.properties.notify || c.properties.indicate);
+
+        console.log('[ESP32 BLE] Karakteristik GATT ditemukan:', {
+          service: service.uuid,
+          rxWrite: this.rxCharacteristic ? this.rxCharacteristic.uuid : 'TIDAK_DITEMUKAN',
+          txNotify: this.txCharacteristic ? this.txCharacteristic.uuid : 'TIDAK_DITEMUKAN'
+        });
 
         if (this.txCharacteristic) {
           try {
             await this.txCharacteristic.startNotifications();
-            this.txCharacteristic.addEventListener('characteristicvaluechanged', (ev) => {
+            console.log('[ESP32 BLE] startNotifications BERHASIL pada karakteristik TX:', this.txCharacteristic.uuid);
+
+            this._boundNotificationHandler = (ev) => {
               const text = new TextDecoder().decode(ev.target.value);
               this._handleIncomingChunk(text);
-            });
+            };
+            this.txCharacteristic.addEventListener('characteristicvaluechanged', this._boundNotificationHandler);
+
+            // Minta snapshot sensor awal secara proaktif agar ESP32 langsung membalas
+            setTimeout(async () => {
+              try {
+                if (this.rxCharacteristic && this.device && this.device.gatt && this.device.gatt.connected) {
+                  console.log('[ESP32 BLE] Mengirim kueri awal: get_sensors');
+                  await this._writeBLECommand('get_sensors');
+                }
+              } catch (qe) {
+                console.warn('[ESP32 BLE] Kueri get_sensors pasca-koneksi dilewati:', qe.message);
+              }
+            }, 300);
           } catch (e) {
-            console.warn('ESP32 BLE notification start warning:', e);
+            console.warn('[ESP32 BLE] Gagal startNotifications pada TX characteristic:', e);
           }
+        } else {
+          console.error('[ESP32 BLE] Karakteristik TX (Notify) tidak ditemukan pada service Nordic UART!');
         }
 
         this.lastTelemetry = {
           deviceId: this.device.name || 'VERNOVA-ESP32-BLE',
-          firmwareVersion: 'ESP32-BLE-UART-v2.4',
+          firmwareVersion: 'ESP32-BLE-UART-v2.4.1',
           state: 'READY',
           protocol: 'NORDIC-UART-JSON',
           lastSeen: new Date().toISOString()
@@ -1016,20 +1045,53 @@
 
     _handleIncomingChunk(chunk) {
       const raw = String(chunk || '');
+      if (!raw) return;
+      console.log(`[ESP32 BLE RAW CHUNK] ${raw}`);
       this._rxBuffer += raw;
+
+      if (this._rxFlushTimer) {
+        clearTimeout(this._rxFlushTimer);
+        this._rxFlushTimer = null;
+      }
+
+      // 1. Ekstrak baris-baris lengkap yang diakhiri newline \n
       let newlineIdx;
       while ((newlineIdx = this._rxBuffer.indexOf('\n')) !== -1) {
-        const line = this._rxBuffer.slice(0, newlineIdx).trim();
+        const line = this._rxBuffer.slice(0, newlineIdx).replace(/\r$/, '').trim();
         this._rxBuffer = this._rxBuffer.slice(newlineIdx + 1);
         if (line.length > 0) {
           this._processIncomingLine(line);
+        }
+      }
+
+      // 2. Cegah buffer menunggu newline selamanya jika firmware mengirim data tanpa \n
+      if (this._rxBuffer.length > 0) {
+        const trimmed = this._rxBuffer.trim();
+        const isCompleteJson = trimmed.startsWith('{') && trimmed.endsWith('}');
+        const isColorWord = ['merah', 'kuning', 'biru', 'arm', 'kosong', 'none', 'clear'].includes(trimmed.toLowerCase());
+
+        if (isCompleteJson || isColorWord || this._rxBuffer.length >= 256) {
+          this._rxBuffer = '';
+          this._processIncomingLine(trimmed);
+        } else {
+          // Auto-flush jika tidak ada potongan lanjutan dalam 150ms
+          this._rxFlushTimer = setTimeout(() => {
+            if (this._rxBuffer.length > 0) {
+              const pending = this._rxBuffer.replace(/[\r\n]+$/, '').trim();
+              this._rxBuffer = '';
+              if (pending.length > 0) {
+                console.log(`[ESP32 BLE Auto-Flush] Memproses sisa buffer tanpa newline: "${pending}"`);
+                this._processIncomingLine(pending);
+              }
+            }
+          }, 150);
         }
       }
     }
 
     _processIncomingLine(line) {
       if (!line) return;
-      console.log(`[BLE RX] ${line}`);
+      console.log(`[ESP32 BLE LINE] ${line}`);
       this.lastAck = { raw: line, timestamp: new Date().toISOString() };
 
       // 1. Parsing JSON (Format Telemetri Sensor ESP32 Berdasarkan MakeCode & ADC)
@@ -1044,6 +1106,7 @@
 
       if (parsedJson && parsedJson.type) {
         if (parsedJson.type === 'sensor_update') {
+          this.hasReceivedPhysicalData = true;
           const sName = String(parsedJson.sensor || '').toLowerCase().trim();
           const isDetected = Boolean(parsedJson.detected);
           const rawVal = parsedJson.value !== undefined ? parsedJson.value : null;
@@ -1072,12 +1135,19 @@
         }
 
         if (parsedJson.type === 'sensor_state') {
+          this.hasReceivedPhysicalData = true;
           if (parsedJson.sensors && typeof parsedJson.sensors === 'object') {
             Object.entries(parsedJson.sensors).forEach(([k, v]) => {
               const sName = k.toLowerCase().trim();
               const isDetected = Boolean(v);
               this.sensorState.sensors[sName] = isDetected;
               this.sensorState.channels[sName.toUpperCase()] = isDetected ? 'OBJECT_PRESENT' : 'OBJECT_ABSENT';
+            });
+          }
+          if (parsedJson.rawValues && typeof parsedJson.rawValues === 'object') {
+            Object.entries(parsedJson.rawValues).forEach(([k, v]) => {
+              const sName = k.toLowerCase().trim();
+              this.sensorState.rawValues[sName] = v;
             });
           }
           if (parsedJson.mode) {
@@ -1111,8 +1181,54 @@
         }
       }
 
-      // 2. Parsing Format Teks (Kompatibilitas Penuh micro:bit MakeCode BLE)
+      // 2. Fallback Parsing Warna Sederhana (Jika Firmware Mengirim TextLine Warna Sederhana: merah, kuning, biru, arm, kosong)
+      const cleanLower = line.toLowerCase().trim();
+      if (['merah', 'kuning', 'biru', 'arm', 'kosong', 'none', 'clear'].includes(cleanLower)) {
+        this.hasReceivedPhysicalData = true;
+        console.log(`[ESP32 BLE TextLine Sensor] Terdeteksi token warna sensor: "${cleanLower}"`);
+
+        if (cleanLower === 'kosong' || cleanLower === 'none' || cleanLower === 'clear') {
+          this.sensorState.sensors = { merah: false, biru: false, kuning: false, arm: false };
+          this.sensorState.channels = { MERAH: 'OBJECT_ABSENT', BIRU: 'OBJECT_ABSENT', KUNING: 'OBJECT_ABSENT', ARM: 'OBJECT_ABSENT' };
+          this.sensorState.objectPresent = false;
+          this.sensorState.state = 'OBJECT_ABSENT';
+          this.sensorState.lastUpdate = new Date().toISOString();
+
+          this._notify(this.status, `[ESP32 BLE] Sensor Kosong (Standby)`, {
+            type: 'sensor_telemetry',
+            sensor: 'all',
+            detected: false,
+            sensorState: { ...this.sensorState },
+            rawText: line
+          });
+          return;
+        } else {
+          this.sensorState.sensors[cleanLower] = true;
+          this.sensorState.channels[cleanLower.toUpperCase()] = 'OBJECT_PRESENT';
+          ['merah', 'kuning', 'biru'].forEach(c => {
+            if (c !== cleanLower) {
+              this.sensorState.sensors[c] = false;
+              this.sensorState.channels[c.toUpperCase()] = 'OBJECT_ABSENT';
+            }
+          });
+          this.sensorState.objectPresent = true;
+          this.sensorState.state = 'OBJECT_PRESENT';
+          this.sensorState.lastUpdate = new Date().toISOString();
+
+          this._notify(this.status, `[ESP32 BLE] Sensor ${cleanLower.toUpperCase()} Terdeteksi`, {
+            type: 'sensor_telemetry',
+            sensor: cleanLower,
+            detected: true,
+            sensorState: { ...this.sensorState },
+            rawText: line
+          });
+          return;
+        }
+      }
+
+      // 3. Parsing Format Teks (Kompatibilitas Penuh micro:bit MakeCode BLE)
       if (line.includes('SENSOR:OBJECT_PRESENT')) {
+        this.hasReceivedPhysicalData = true;
         this.sensorState.objectPresent = true;
         this.sensorState.state = 'OBJECT_PRESENT';
         this.sensorState.lastUpdate = new Date().toISOString();
@@ -1125,6 +1241,7 @@
       }
 
       if (line.includes('SENSOR:OBJECT_ABSENT')) {
+        this.hasReceivedPhysicalData = true;
         this.sensorState.objectPresent = false;
         this.sensorState.state = 'OBJECT_ABSENT';
         this.sensorState.lastUpdate = new Date().toISOString();
@@ -1137,6 +1254,7 @@
       }
 
       if (line.startsWith('SENSOR:')) {
+        this.hasReceivedPhysicalData = true;
         const parts = line.split(':');
         if (parts.length >= 3) {
           const channel = parts[1].toUpperCase().trim();
@@ -1167,18 +1285,61 @@
         }
       }
 
-      // 3. Parsing Stage Updates
-      if (line.startsWith('STATUS:')) {
-        const stage = line.replace(/^STATUS:/, '').trim();
+      // 4. Parsing Stage & Completion Updates (Mendukung STATUS:, STATUS mode=... message=..., dan DONE:)
+      if (line.startsWith('STATUS:') || line.startsWith('STATUS ') || line === 'STATUS') {
+        let stage = '';
+        let messageParam = '';
+        let modeParam = '';
+        let motorParam = '';
+
+        if (line.startsWith('STATUS:')) {
+          stage = line.replace(/^STATUS:/, '').trim();
+        } else {
+          // Format MakeCode Port: STATUS mode=servo motor=on message=sort_servo_kuning_done
+          const msgMatch = line.match(/message=([^\s]+)/i);
+          const modeMatch = line.match(/mode=([^\s]+)/i);
+          const motorMatch = line.match(/motor=([^\s]+)/i);
+          if (msgMatch) messageParam = msgMatch[1].trim();
+          if (modeMatch) modeParam = modeMatch[1].trim();
+          if (motorMatch) motorParam = motorMatch[1].trim();
+          stage = messageParam || line.replace(/^STATUS\s*/i, '').trim();
+        }
+
+        // Deteksi apakah pesan status ini mengindikasikan penyortiran selesai
+        const isSortCompleted = stage.includes('_done') || stage.includes('pass_through') || stage.includes('detected_motor_stopped') || stage.includes('DONE');
+        let finishedColor = null;
+        if (stage.includes('kuning')) finishedColor = 'kuning';
+        else if (stage.includes('biru')) finishedColor = 'biru';
+        else if (stage.includes('merah')) finishedColor = 'merah';
+
+        if (modeParam) this.sensorState.mode = modeParam.toLowerCase();
+
         this._notify(this.status, `[ESP32 BLE Status] ${stage}`, {
-          type: 'stage_update',
+          type: isSortCompleted ? 'sort_completed' : 'stage_update',
           stage,
+          message: stage,
+          color: finishedColor,
+          verified: isSortCompleted,
+          mode: modeParam || this.sensorState.mode,
+          motor: motorParam,
           rawText: line
         });
         return;
       }
 
-      // 4. Notifikasi umum lainnya
+      if (line.startsWith('DONE:') || line.startsWith('DONE ') || line === 'DONE') {
+        let col = line.replace(/^DONE[:\s]*/i, '').trim().toLowerCase();
+        this._notify(this.status, `[ESP32 BLE Done] Sortir ${col || 'selesai'}`, {
+          type: 'sort_completed',
+          color: col || null,
+          stage: `sort_${col || 'selesai'}_done`,
+          verified: true,
+          rawText: line
+        });
+        return;
+      }
+
+      // 5. Notifikasi umum lainnya (ACK, DONE, dsb.)
       this._notify(this.status, `[ESP32 BLE RX] ${line}`, { rawText: line });
     }
 
@@ -1191,6 +1352,18 @@
     }
 
     async disconnect() {
+      if (this._rxFlushTimer) {
+        clearTimeout(this._rxFlushTimer);
+        this._rxFlushTimer = null;
+      }
+      if (this.txCharacteristic && this._boundNotificationHandler) {
+        try {
+          this.txCharacteristic.removeEventListener('characteristicvaluechanged', this._boundNotificationHandler);
+        } catch (e) {
+          console.warn('[ESP32 BLE] Error unbinding notification listener:', e);
+        }
+      }
+      this._boundNotificationHandler = null;
       if (this.device && this.device.gatt && this.device.gatt.connected) {
         this.device.gatt.disconnect();
       }
@@ -1199,6 +1372,7 @@
       this.rxCharacteristic = null;
       this.txCharacteristic = null;
       this._rxBuffer = '';
+      this.hasReceivedPhysicalData = false;
       this._notify(CONNECTION_STATES.DISCONNECTED, 'Koneksi ESP32 Bluetooth BLE diputuskan.');
       return { ok: true };
     }
@@ -1269,7 +1443,41 @@
       // Kasus B: Hardware Nyata via BLE GATT UART (Mengirim data warna dan mekanisme: misal "merah servo" / "merah arm")
       this._notify(CONNECTION_STATES.BUSY, `Mengirim ke ESP32 BLE: "${fullCmd}"...`);
       try {
+        let isPhysicallyVerified = false;
+        let completionDetail = null;
+
+        // Pasang listener verifikasi sebelum mengirim perintah
+        const unsubscribe = this.addListener((ev) => {
+          if (!ev) return;
+          // 1. Konfirmasi dari telemetri sensor fisik
+          if (ev.type === 'sensor_telemetry') {
+            if ((ev.sensor === color || ev.channel === color.toUpperCase() || ev.sensorState?.sensors?.[color]) && ev.detected) {
+              isPhysicallyVerified = true;
+              completionDetail = `Sensor ${color.toUpperCase()} terdeteksi`;
+            }
+          }
+          // 2. Konfirmasi status selesai sortir dari firmware (sort_servo_kuning_done, DONE:, dsb.)
+          if (ev.type === 'sort_completed' || (ev.stage && ev.stage.includes(color) && (ev.stage.includes('done') || ev.stage.includes('stopped') || ev.stage.includes('pass_through')))) {
+            isPhysicallyVerified = true;
+            completionDetail = ev.stage || 'Sortir selesai';
+          }
+        });
+
         await this._writeBLECommand(fullCmd);
+
+        // Tunggu respons/konfirmasi sensor fisik atau status selesai dari ESP32
+        const maxWaitMs = params.waitForConfirmation === false ? 0 : (modeStr === 'arm' ? 3500 : 2500);
+        const checkInterval = 50;
+        let waitedMs = 0;
+
+        while (waitedMs < maxWaitMs) {
+          if (isPhysicallyVerified) break;
+          await new Promise(r => setTimeout(r, checkInterval));
+          waitedMs += checkInterval;
+        }
+
+        unsubscribe();
+
         const durationMs = Date.now() - startTime;
         const result = {
           ok: true,
@@ -1277,12 +1485,20 @@
           color,
           mode,
           command: fullCmd,
-          status: 'COMMAND_RECEIVED',
-          executionStatus: 'confirmed_esp32_ble',
-          durationMs
+          status: isPhysicallyVerified ? 'COMPLETED' : 'COMMAND_RECEIVED',
+          verified: isPhysicallyVerified,
+          sensorVerified: isPhysicallyVerified,
+          statusCategory: isPhysicallyVerified ? 'verified' : 'completed_unverified',
+          executionStatus: isPhysicallyVerified ? 'confirmed_esp32_ble' : 'sent_esp32_ble',
+          durationMs,
+          message: isPhysicallyVerified
+            ? `ESP32 BLE sortir ${fullCmd} selesai & terverifikasi fisik (${durationMs}ms)`
+            : `ESP32 BLE sortir ${fullCmd} terkirim (${durationMs}ms)`
         };
         this.lastAck = result;
-        this._notify(CONNECTION_STATES.CONNECTED, `ESP32 BLE sortir ${fullCmd} terkirim (${durationMs}ms)`);
+        this._notify(CONNECTION_STATES.CONNECTED, `ESP32 BLE sortir ${fullCmd} ${isPhysicallyVerified ? 'terverifikasi fisik' : 'terkirim'} (${durationMs}ms)`, {
+          transaction: result
+        });
         return result;
       } catch (err) {
         const durationMs = Date.now() - startTime;

@@ -5,7 +5,7 @@
  * Board: ESP32 DevKit V1 / NodeMCU-32S / ESP32-WROOM-32
  * Framework: Arduino IDE (ESP32 Arduino Core 2.x & 3.x Compatible)
  * 
- * Fitur Komunikasi Terpadu:
+ * Fitur Komunikasi Terpadu & Diagnostik Telemetri Sensor:
  * 1. Dual Wi-Fi Mode:
  *    - SoftAP Mode (Hotspot mandiri 'VERNOVA-ROBOT' IP: 192.168.4.1)
  *    - Station Mode (Koneksi ke Wi-Fi Lab Sekolah / Hotspot)
@@ -14,14 +14,20 @@
  *    - Service UUID: 6e400001-b5a3-f393-e0a9-e50e24dcca9e
  *    - RX Char UUID: 6e400002-b5a3-f393-e0a9-e50e24dcca9e (Web Write)
  *    - TX Char UUID: 6e400003-b5a3-f393-e0a9-e50e24dcca9e (ESP32 Notify)
- * 3. Telemetri Sensor Fisik Berdasarkan MakeCode micro:bit:
+ *    - MTU 517 didukung untuk transmisi data cepat tanpa terpotong
+ * 3. Telemetri Sensor Fisik Berdasarkan MakeCode micro:bit & Nilai Mentah (ADC):
  *    - Sensor Merah (GPIO 14, digital active LOW)
  *    - Sensor Biru  (GPIO 13, digital active LOW)
  *    - Sensor Kuning (GPIO 35, analog ADC: range 50 < value <= 400)
  *    - Sensor Arm    (GPIO 34, analog ADC: value < 600)
  *    - Emisi JSON satu baris \n: {"type":"sensor_update",...} & {"type":"sensor_state",...}
- *    - Kompatibilitas teks micro:bit: SENSOR:<NAME>:OBJECT_PRESENT, STATUS:..., DONE:...
- * 4. Kontrol Aktuator Aman:
+ *    - Emisi Fallback Teks: "merah", "kuning", "biru", "arm", "kosong" (sendTextLine)
+ *    - Emisi Format micro:bit: SENSOR:<NAME>:OBJECT_PRESENT, STATUS:..., DONE:...
+ * 4. Sinkronisasi Koneksi Aman:
+ *    - Snapshot telemetri dikirim otomatis 600ms pasca-koneksi (setelah browser startNotifications)
+ *    - Menanggapi perintah kueri "get_sensors" / "status" secara langsung
+ *    - Heartbeat berkala 1500ms mengirim nilai mentah sensor untuk kalibrasi real-time di web
+ * 5. Kontrol Aktuator Aman:
  *    - Kecepatan PWM Motor: Mode Servo = 200/255, Mode Arm = 150/255
  *    - Sudut Servo Flap: Standby 90°, Sortir 30° (atau 40°/90°/140° per warna)
  *    - Sudut Servo Arm: Standby 90°, Push 180°
@@ -68,8 +74,7 @@ const char* STA_PASS = "";               // Contoh: "passwordLab"
 #define PIN_SERVO_ARM       19  // Servo 2: Lengan robot (Arm)
 #define PIN_LED_STATUS      2   // LED indikator onboard ESP32
 
-// Mode pin sensor digital: INPUT aman untuk sensor dengan komparator LM393 internal pullup
-// Ganti ke INPUT_PULLUP jika modul open-collector tanpa resistor pull-up eksternal
+// Mode pin sensor digital: INPUT aman untuk modul komparator LM393 push-pull/pullup eksternal
 #define SENSOR_DIGITAL_MODE INPUT
 
 // =========================================================================
@@ -80,25 +85,23 @@ const char* STA_PASS = "";               // Contoh: "passwordLab"
 #define PWM_SPEED_ARM       150 // Kecepatan mode arm: 150 dari 255
 
 // Sudut Gerakan Servo
-#define SERVO_STANDBY_ANGLE      90  // Standby servo (90 derajat)
+#define SERVO_STANDBY_ANGLE      90  // Standby servo flap (90 derajat)
 #define SERVO_SORT_ANGLE         30  // Sudut sortir umum (30 derajat)
 #define SERVO_ARM_STANDBY_ANGLE  90  // Standby servo lengan robot (90 derajat)
 #define SERVO_ARM_PUSH_ANGLE    180  // Gerakan dorong mode arm (180 derajat)
 
-// Sudut spesifik flap jalur warna (opsional / lanjutan)
+// Sudut spesifik flap jalur warna
 #define SERVO_FLAP_KUNING        40
 #define SERVO_FLAP_BIRU          90
 #define SERVO_FLAP_MERAH        140
 
 // Kalibrasi Threshold Sensor Analog (ESP32 ADC 12-bit: 0 - 4095)
-// Catatan: micro:bit menggunakan ADC 10-bit (0-1023). Nilai di bawah dapat dikalibrasi
-// berdasarkan nilai mentah (raw) yang ditampilkan di Serial Monitor & Web Telemetri.
 int thresholdKuningMin = 50;     // Deteksi kuning jika: value > 50 && value <= 400
 int thresholdKuningMax = 400;
 int thresholdArmMax    = 600;    // Deteksi arm jika: value < 600
 
-#define SENSOR_DEBOUNCE_MS  30   // Debounce filter
-#define HEARTBEAT_INTERVAL_MS 3000 // Pengiriman berkala telemetri sensor ke web
+#define SENSOR_DEBOUNCE_MS      30   // Debounce filter (ms)
+#define HEARTBEAT_INTERVAL_MS   1500 // Interval heartbeat telemetri sensor ke web (1.5s)
 
 // =========================================================================
 // 4. OBJEK & VARIABEL GLOBAL
@@ -111,6 +114,8 @@ BLEServer *pBleServer = NULL;
 BLECharacteristic *pBleTxChar = NULL;
 bool bleConnected = false;
 bool oldBleConnected = false;
+bool pendingInitialSync = false;
+unsigned long bleConnectTimestamp = 0;
 
 String deviceId = "VERNOVA-ESP32";
 String currentMode = "servo";     // "servo" atau "arm"
@@ -150,15 +155,23 @@ void setMotorRunning(bool run, int customPwm = -1) {
   }
 }
 
+// Fungsi pengiriman notifikasi BLE aman dengan newline delimiter
 void notifyBLE(String message) {
+  if (!message.endsWith("\n")) {
+    message += "\n";
+  }
   if (bleConnected && pBleTxChar) {
     pBleTxChar->setValue(message.c_str());
     pBleTxChar->notify();
-    delay(15); // Memberi jeda bagi BLE stack untuk transmisi paket
+    delay(10); // Memberi jeda bagi BLE stack untuk transmisi paket
   }
-  Serial.print("[BLE TX] ");
+  Serial.print("[BLE TX NOTIFY] ");
   Serial.print(message);
-  if (!message.endsWith("\n")) Serial.println();
+}
+
+// Kompatibilitas fungsi sendTextLine untuk MakeCode micro:bit
+void sendTextLine(String text) {
+  notifyBLE(text);
 }
 
 // =========================================================================
@@ -166,7 +179,8 @@ void notifyBLE(String message) {
 // =========================================================================
 void sendSensorUpdate(const char* name, bool detected, int rawValue) {
   unsigned long ts = millis();
-  // 1. JSON Telemetri Standar
+
+  // 1. JSON Telemetri Standar (Satu Baris \n)
   String json = "{\"type\":\"sensor_update\",\"sensor\":\"" + String(name) +
                 "\",\"detected\":" + (detected ? "true" : "false") +
                 ",\"value\":" + String(rawValue) +
@@ -178,23 +192,46 @@ void sendSensorUpdate(const char* name, bool detected, int rawValue) {
   nameUpper.toUpperCase();
   String legacy = "SENSOR:" + nameUpper + ":" + (detected ? "OBJECT_PRESENT\n" : "OBJECT_ABSENT\n");
   notifyBLE(legacy);
+
+  // 3. Fallback nama warna langsung (merah, kuning, biru, arm, kosong)
+  if (detected) {
+    sendTextLine(String(name));
+  } else {
+    bool any = sensorMerah.detected || sensorBiru.detected || sensorKuning.detected || sensorArm.detected;
+    if (!any) sendTextLine("kosong");
+  }
 }
 
 void sendFullSensorState() {
+  unsigned long ts = millis();
+
+  // JSON State Lengkap termasuk status deteksi DAN nilai mentah ADC untuk kalibrasi UI
   String json = "{\"type\":\"sensor_state\",\"mode\":\"" + currentMode + "\",\"sensors\":{";
   json += "\"merah\":" + String(sensorMerah.detected ? "true" : "false") + ",";
   json += "\"biru\":" + String(sensorBiru.detected ? "true" : "false") + ",";
   json += "\"kuning\":" + String(sensorKuning.detected ? "true" : "false") + ",";
   json += "\"arm\":" + String(sensorArm.detected ? "true" : "false");
-  json += "}}\n";
+  json += "},\"rawValues\":{";
+  json += "\"merah\":" + String(sensorMerah.rawValue) + ",";
+  json += "\"biru\":" + String(sensorBiru.rawValue) + ",";
+  json += "\"kuning\":" + String(sensorKuning.rawValue) + ",";
+  json += "\"arm\":" + String(sensorArm.rawValue);
+  json += "},\"timestamp\":" + String(ts) + "}\n";
   notifyBLE(json);
 
   bool anyDetected = sensorMerah.detected || sensorBiru.detected || sensorKuning.detected || sensorArm.detected;
   notifyBLE(anyDetected ? "SENSOR:OBJECT_PRESENT\n" : "SENSOR:OBJECT_ABSENT\n");
+
+  // Fallback teks ringkas warna
+  if (sensorMerah.detected) sendTextLine("merah");
+  else if (sensorBiru.detected) sendTextLine("biru");
+  else if (sensorKuning.detected) sendTextLine("kuning");
+  else if (sensorArm.detected) sendTextLine("arm");
+  else sendTextLine("kosong");
 }
 
 void printSensorDebug(const char* name, int raw, bool detected) {
-  Serial.print("[SENSOR] ");
+  Serial.print("[SENSOR READ] ");
   Serial.print(name);
   Serial.print(" raw=");
   Serial.print(raw);
@@ -282,11 +319,16 @@ void updateSensors() {
     sendFullSensorState();
   }
 
-  // Heartbeat berkala (setiap 3 detik) untuk menjaga sinkronisasi UI
+  // Heartbeat berkala (setiap 1.5 detik) untuk memperbarui nilai mentah dan sinkronisasi UI
   if (now - lastHeartbeatTime >= HEARTBEAT_INTERVAL_MS) {
     lastHeartbeatTime = now;
     if (bleConnected) {
       sendFullSensorState();
+      Serial.printf("[SENSOR HEARTBEAT] M:%s(%d) B:%s(%d) K:%s(%d) ARM:%s(%d)\n",
+                    sensorMerah.detected ? "ON" : "OFF", sensorMerah.rawValue,
+                    sensorBiru.detected ? "ON" : "OFF", sensorBiru.rawValue,
+                    sensorKuning.detected ? "ON" : "OFF", sensorKuning.rawValue,
+                    sensorArm.detected ? "ON" : "OFF", sensorArm.rawValue);
     }
   }
 }
@@ -472,7 +514,7 @@ void handleHealth() {
   json += "\"ok\":true,";
   json += "\"deviceId\":\"" + deviceId + "\",";
   json += "\"deviceType\":\"ESP32\",";
-  json += "\"firmwareVersion\":\"2.4.0-DUAL\",";
+  json += "\"firmwareVersion\":\"2.4.1-DUAL\",";
   json += "\"state\":\"" + deviceState + "\",";
   json += "\"mode\":\"" + currentMode + "\",";
   json += "\"wifiRssi\":" + String(rssi) + ",";
@@ -585,23 +627,18 @@ void handleTest() {
 class ServerCallbacks: public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) {
     bleConnected = true;
+    pendingInitialSync = true;
+    bleConnectTimestamp = millis();
     digitalWrite(PIN_LED_STATUS, HIGH);
-    Serial.println("[BLE] Client terhubung!");
-    notifyBLE("STATUS:READY\n");
-    
-    // Kirim status awal semua sensor secara lengkap saat koneksi terbentuk
-    sendSensorUpdate("merah", sensorMerah.detected, sensorMerah.rawValue);
-    sendSensorUpdate("biru", sensorBiru.detected, sensorBiru.rawValue);
-    sendSensorUpdate("kuning", sensorKuning.detected, sensorKuning.rawValue);
-    sendSensorUpdate("arm", sensorArm.detected, sensorArm.rawValue);
-    sendFullSensorState();
+    Serial.println("[BLE CONN] Client terhubung. Menunggu kesiapan browser (startNotifications)...");
   }
 
   void onDisconnect(BLEServer* pServer) {
     bleConnected = false;
+    pendingInitialSync = false;
     digitalWrite(PIN_LED_STATUS, LOW);
     setMotorRunning(false);
-    Serial.println("[BLE] Client terputus!");
+    Serial.println("[BLE CONN] Client terputus!");
   }
 };
 
@@ -612,6 +649,13 @@ class CharCallbacks: public BLECharacteristicCallbacks {
     if (rx.length() == 0) return;
 
     Serial.println("[BLE RX] " + rx);
+
+    // Kueri Status / Snapshot Telemetri dari Web
+    if (rx == "get_sensors" || rx == "status" || rx == "sensors" || rx == "query") {
+      Serial.println("[BLE RX Query] Permintaan telemetri sensor diterima dari web. Mengirim snapshot...");
+      sendFullSensorState();
+      return;
+    }
 
     // 1. Ekstrak Warna (merah, kuning, biru)
     String targetColor = "";
@@ -653,7 +697,7 @@ void setup() {
 
   Serial.println("\n==============================================");
   Serial.println("  VERNOVA — ESP32 Dual Connection (Wi-Fi + BLE)");
-  Serial.println("  Firmware Sensor & Actuator v2.4.0");
+  Serial.println("  Firmware Sensor & Actuator v2.4.1 (Diagnostik)");
   Serial.println("==============================================");
 
   // Konfigurasi Pin Digital Aktuator
@@ -704,6 +748,8 @@ void setup() {
 
   // 3. Inisialisasi Bluetooth BLE Nordic UART Service (NUS)
   BLEDevice::init("VERNOVA-ESP32");
+  BLEDevice::setMTU(517); // Negosiasi MTU 517 byte agar paket JSON telemetri tidak terfragmentasi
+
   pBleServer = BLEDevice::createServer();
   pBleServer->setCallbacks(new ServerCallbacks());
 
@@ -740,6 +786,13 @@ void loop() {
   }
   if (bleConnected && !oldBleConnected) {
     oldBleConnected = bleConnected;
+  }
+
+  // Kirim snapshot telemetri sensor awal setelah browser selesai melakukan startNotifications (~600ms)
+  if (pendingInitialSync && (millis() - bleConnectTimestamp >= 600)) {
+    pendingInitialSync = false;
+    Serial.println("[BLE] Browser siap. Mengirimkan snapshot telemetri sensor awal...");
+    sendFullSensorState();
   }
 
   // Update pembacaan sensor fisik dengan debounce & emisi telemetri

@@ -1830,11 +1830,6 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
               </ul>
             </div>
           </div>
-
-          <div id="esp32-telemetry-box" class="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[10px] text-emerald-800 dark:text-emerald-200 hidden">
-            <div class="flex items-center gap-1.5 font-bold mb-0.5"><i class="fas fa-circle-check text-emerald-600"></i><span>Telemetri ESP32 Aktif:</span></div>
-            <div id="esp32-telemetry-text" class="font-mono text-[9px] truncate">—</div>
-          </div>
         </div>
       </div>
 
@@ -1857,6 +1852,15 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
             </button>
           </div>
         </div>
+      </div>
+
+      <!-- Kotak Telemetri Sensor Fisik ESP32 (Berlaku untuk Wi-Fi dan Bluetooth BLE) -->
+      <div id="esp32-telemetry-box" class="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[10px] text-emerald-800 dark:text-emerald-200 mb-4 hidden">
+        <div class="flex items-center justify-between mb-1">
+          <div class="flex items-center gap-1.5 font-bold"><i class="fas fa-circle-check text-emerald-600"></i><span>Telemetri Sensor ESP32 Aktif:</span></div>
+          <span class="font-mono text-[9px] opacity-75">Nordic UART / REST</span>
+        </div>
+        <div id="esp32-telemetry-text" class="font-mono text-[9px] break-all leading-relaxed">Menunggu telemetri dari ESP32...</div>
       </div>
 
       <!-- Mode Simulasi Virtual (Berlaku untuk perangkat aktif apa pun) -->
@@ -2326,6 +2330,48 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
   if (window.deviceManager && typeof window.deviceManager.onStatusChange === 'function') {
     window.deviceManager.onStatusChange((ev) => {
       updateDeviceUI(ev);
+
+      // Upgrade status transaksi terakhir ke TERVERIFIKASI FISIK jika sinyal sensor / status selesai diterima
+      if (ev && (ev.type === 'sort_completed' || (ev.type === 'sensor_telemetry' && ev.detected))) {
+        const confirmedColor = (ev.color || (ev.sensor !== 'all' ? ev.sensor : null) || '').toLowerCase();
+        if (confirmedColor && state.excelLogs && state.excelLogs.length > 0) {
+          const lastLog = state.excelLogs[state.excelLogs.length - 1];
+          if (lastLog && !lastLog.verified && lastLog.warna && lastLog.warna.toLowerCase() === confirmedColor) {
+            lastLog.verified = true;
+            lastLog.sensorVerified = true;
+            lastLog.status = 'Berhasil (Terverifikasi)';
+            lastLog.statusCategory = 'verified';
+            lastLog.nilai = 1;
+
+            if (state.sortingData.unverifiedTotal > 0) state.sortingData.unverifiedTotal--;
+            state.sortingData.totalVerified++;
+            state.sortingData.total++;
+            const targetMech = (String(lastLog.mode || '').toLowerCase().includes('arm')) ? 'arm' : 'servo';
+            const classKey = `${confirmedColor}_${targetMech}`;
+            if (typeof state.sortingData[classKey] === 'number') state.sortingData[classKey]++;
+            if (typeof state.sortingData[confirmedColor] === 'number') state.sortingData[confirmedColor]++;
+
+            // Update feed item pertama jika sesuai warna
+            if (state.feeds && state.feeds.length > 0) {
+              const f = state.feeds[0];
+              if (f.title && f.title.toLowerCase().includes(confirmedColor)) {
+                f.title = `${lastLog.warna} Tersortir (TERVERIFIKASI)`;
+                f.icon = 'fas fa-circle-check';
+              }
+            }
+
+            if (typeof updateUIStats === 'function') updateUIStats();
+            if (typeof updateChart === 'function') updateChart();
+            if (typeof renderFeed === 'function') renderFeed();
+
+            const manVerif = $('man-verif-pill');
+            if (manVerif) {
+              manVerif.innerText = `VERIFIKASI: VALID SENSOR (${confirmedColor.toUpperCase()})`;
+              manVerif.className = 'pill green font-bold';
+            }
+          }
+        }
+      }
     });
   }
 
@@ -2483,17 +2529,30 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
       const activeAdapter = window.deviceManager ? window.deviceManager.getActiveAdapter() : null;
       const telem = activeAdapter ? activeAdapter.lastTelemetry : null;
       const sensorState = activeAdapter ? (activeAdapter.sensorState || (typeof activeAdapter.getSensorState === 'function' ? activeAdapter.getSensorState() : null)) : null;
+      const hasPhysical = activeAdapter && (activeAdapter.hasReceivedPhysicalData || Boolean(sensorState?.lastUpdate));
 
       if ((isEspWifi || isEspBle) && (st === 'CONNECTED' || isSim)) {
         esp32Telem.classList.remove('hidden');
         const telemText = $('esp32-telemetry-text');
         if (telemText) {
-          if (sensorState && sensorState.sensors) {
+          if (isSim) {
+            telemText.innerText = 'Mode Simulasi Virtual Hardware Aktif (Data Sintetis/Mock).';
+          } else if (hasPhysical && sensorState && sensorState.sensors) {
             const s = sensorState.sensors;
             const r = sensorState.rawValues || {};
-            telemText.innerText = `M: ${s.merah ? 'ON' : '0'}(${r.merah ?? 0}) | B: ${s.biru ? 'ON' : '0'}(${r.biru ?? 0}) | K: ${s.kuning ? 'ON' : '0'}(raw:${r.kuning ?? '—'}) | ARM: ${s.arm ? 'ON' : '0'}(raw:${r.arm ?? '—'})`;
+            const mStr = s.merah ? 'ON' : 'OFF';
+            const bStr = s.biru ? 'ON' : 'OFF';
+            const kStr = s.kuning ? 'ON' : 'OFF';
+            const aStr = s.arm ? 'ON' : 'OFF';
+            const mVal = (r.merah !== null && r.merah !== undefined) ? r.merah : '—';
+            const bVal = (r.biru !== null && r.biru !== undefined) ? r.biru : '—';
+            const kVal = (r.kuning !== null && r.kuning !== undefined) ? r.kuning : '—';
+            const aVal = (r.arm !== null && r.arm !== undefined) ? r.arm : '—';
+            telemText.innerText = `Merah: ${mStr} (${mVal}) | Biru: ${bStr} (${bVal}) | Kuning: ${kStr} (${kVal}) | Arm: ${aStr} (${aVal})`;
           } else if (telem) {
-            telemText.innerText = `ID: ${telem.deviceId || 'ESP32'} | Host: ${telem.host || cfg.host} | Heap: ${telem.freeHeap ? Math.round(telem.freeHeap/1024) + ' KB' : 'OK'} | Uptime: ${telem.uptimeSec ? telem.uptimeSec + 's' : 'Aktif'}`;
+            telemText.innerText = `Menunggu telemetri fisik ESP32... (ID: ${telem.deviceId || 'ESP32'} | State: ${telem.state || 'READY'})`;
+          } else {
+            telemText.innerText = 'Menghubungkan ke ESP32 & menunggu telemetri sensor...';
           }
         }
       } else {
@@ -2503,16 +2562,28 @@ html.dark .icon-btn:hover{background:rgba(198,154,69,.12);}
 
     // 6. Update Real-time Sensor Telemetry & Stage Pills
     const manVerif = $('man-verif-pill');
-    if (manVerif && ev && (ev.type === 'sensor_telemetry' || ev.type === 'sensor_state')) {
-      const ss = ev.sensorState || (window.deviceManager && window.deviceManager.getActiveAdapter()?.sensorState);
-      if (ss && ss.sensors) {
+    if (manVerif) {
+      const activeAdapter = window.deviceManager ? window.deviceManager.getActiveAdapter() : null;
+      const hasPhysical = activeAdapter && (activeAdapter.hasReceivedPhysicalData || Boolean(activeAdapter.sensorState?.lastUpdate));
+      const ss = (ev && ev.sensorState) || (activeAdapter && activeAdapter.sensorState);
+
+      if (isSim) {
+        manVerif.innerText = 'VERIFIKASI: SIMULASI VIRTUAL (BUKAN FISIK)';
+        manVerif.className = 'pill yellow font-bold';
+      } else if (st !== 'CONNECTED' && st !== 'READY') {
+        manVerif.innerText = 'VERIFIKASI: BELUM TERVERIFIKASI FISIK';
+        manVerif.className = 'pill gray font-bold';
+      } else if (!hasPhysical) {
+        manVerif.innerText = 'VERIFIKASI: MENUNGGU DATA SENSOR ESP32';
+        manVerif.className = 'pill gray font-bold';
+      } else if (ss && ss.sensors) {
         const activeSensors = Object.entries(ss.sensors).filter(([_, v]) => v).map(([k]) => k.toUpperCase());
         if (activeSensors.length > 0) {
           manVerif.innerText = `VERIFIKASI: OBJEK FISIK TERDETEKSI (${activeSensors.join(', ')})`;
           manVerif.className = 'pill green font-bold';
         } else {
           manVerif.innerText = 'VERIFIKASI: SENSOR KOSONG (STANDBY)';
-          manVerif.className = 'pill gray font-bold';
+          manVerif.className = 'pill blue font-bold';
         }
       }
     }
